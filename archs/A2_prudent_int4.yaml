@@ -1,0 +1,334 @@
+# ============================================================================
+# A2 — Prudent 2-block INT4 baseline
+# ============================================================================
+# Safe fallback. Always ships. INT4 uniform quantization only. No rotation,
+# no codebook, no on-chip attention compute. Host does everything except
+# compression and SRAM buffering.
+#
+# This file is the design-space exploration for A2. The committed
+# architecture specification is in ../../PRD-v1-prudent.md.
+# ============================================================================
+
+id: A2
+name: Prudent LASSO — 2-block INT4 baseline
+tier: prudent
+status: fallback
+one_line_summary: >
+  KV Cache Engine (INT2/3/4 uniform) + SRAM Buffer Controller + SRAM banks.
+  Host runs everything else. This is what ships if TurboQuant development
+  hits a wall.
+
+# ----------------------------------------------------------------------------
+# Dependencies
+# ----------------------------------------------------------------------------
+depends_on:
+  shared:
+    process: _shared/process.yaml
+    citations: _shared/citations.yaml
+    evaluation: _shared/evaluation_axes.yaml
+    shared_risks: _shared/shared_risks.yaml
+    algorithms: _shared/algorithms.yaml
+  algorithm_ids:
+    primary: int4_uniform
+    secondary: [int2_uniform]
+  committed_prd: ../../PRD-v1-prudent.md
+
+# ----------------------------------------------------------------------------
+# Research narrative
+# ----------------------------------------------------------------------------
+research_narrative:
+  paper_title_candidate: "LASSO v1 — An Open-Source KV Cache Compression ASIC on SKY130"
+  novelty_strength: 5
+  comparable_prior_art: [C-03, C-04, C-05]
+  differentiation: >
+    Correct and taped out, but INT4-with-scale-factor is a 2022-era algorithm.
+    In 2028 silicon, this reads as "first open-source tape-out of a
+    well-understood algorithm" — a fabrication achievement, not an
+    architectural contribution. Publishable at student-workshop tier
+    (MICRO-SRC, DAC Work-in-Progress).
+  when_to_pick: >
+    Choose A2 if the Python TurboQuant golden model fails to reproduce the
+    [C-01] 3.5-bit neutrality claim by September 2026, OR if the team drops
+    below 4 people, OR if Phase 0 physical-design validation reveals a
+    toolchain risk that makes stretching to A3 reckless.
+
+# ----------------------------------------------------------------------------
+# Hardware blocks
+# ----------------------------------------------------------------------------
+blocks:
+
+  - id: kv_cache_engine_int4
+    function: >
+      Per-group symmetric INT2/3/4 quantization and dequantization, bit-pack
+      and unpack, optional asymmetric mode, outlier detection, bypass.
+    area_mm2: 0.07
+    area_source: PRD-v1-prudent.md §4
+    verification_tests: 30
+    risk: medium
+    internal_primitives:
+      comparators_16bit: 31
+      multipliers_16x16: 64     # 32 for quantize, 32 for dequant
+      barrel_shifters: 1
+
+  - id: sram_buffer_controller
+    function: >
+      Wishbone B4 slave, address decode, bank arbitration, CSR register file,
+      mode select (quantized / bypass / raw), interrupt, scan chain.
+    area_mm2: 0.02
+    area_source: PRD-v1-prudent.md §5
+    verification_tests: 20
+    risk: low
+
+  - id: sram_subsystem
+    function: 4-8 banks of CF_SRAM_16384x32 (64 KB each)
+    area_mm2: 3.50_to_7.00   # depends on bank count; see design_space
+    verification_tests: 5    # IP is pre-verified
+    risk: low
+
+# ----------------------------------------------------------------------------
+# Resource summary (baseline: 4 banks)
+# ----------------------------------------------------------------------------
+resource_summary:
+  logic_area_mm2: 0.09
+  sram_area_mm2: 3.50                # 4 banks
+  physical_overhead_mm2: 1.60        # from _shared/process.yaml
+  total_mm2_4bank: 5.19
+  total_mm2_6bank: 6.94
+  total_mm2_8bank: 8.69
+  caravel_user_area_mm2: 10.28       # from _shared/process.yaml
+  headroom_4bank_mm2: 5.09
+  headroom_6bank_mm2: 3.34
+  headroom_8bank_mm2: 1.59
+
+# ============================================================================
+# DESIGN SPACE — explorable knobs
+# ============================================================================
+design_space:
+
+  sram_bank_count:
+    type: int
+    values: [4, 5, 6, 7, 8]
+    default: 4
+    stretch: 6
+    maximum: 8
+    rationale: >
+      Starting at 4 gives generous routing headroom for a first tape-out.
+      Add banks only after DRC-clean placement of the baseline count.
+    trade_offs:
+      4:
+        sram_mm2: 3.50
+        headroom_mm2: 5.09
+        kv_tokens_q4_128dim: 819
+        kv_tokens_q2_128dim: 1365
+        physical_design_risk: low
+        go_no_go: "default; safe"
+      6:
+        sram_mm2: 5.25
+        headroom_mm2: 3.34
+        kv_tokens_q4_128dim: 1228
+        kv_tokens_q2_128dim: 2048
+        physical_design_risk: low_medium
+        go_no_go: "stretch target"
+      8:
+        sram_mm2: 7.00
+        headroom_mm2: 1.59
+        kv_tokens_q4_128dim: 1638
+        kv_tokens_q2_128dim: 2730
+        physical_design_risk: medium
+        go_no_go: "only if 6 banks routes cleanly"
+
+  group_size_elements:
+    type: enum
+    values: [32, 64]
+    default: 32
+    trade_offs:
+      32:
+        scale_overhead_bits_per_elem: 0.5
+        comparator_tree_depth: 5
+        floorplan_impact: small
+      64:
+        scale_overhead_bits_per_elem: 0.25  # amortized over more elements
+        comparator_tree_depth: 6
+        floorplan_impact: small
+        quality_risk: "one outlier in a larger group dominates the scale; worse quality"
+    recommendation: 32
+    rationale: >
+      Group size 32 matches typical attention-head structure and keeps the
+      scale-amortization honest. 64 saves 0.25 b/elem but risks quality on
+      outlier-heavy layers.
+
+  supported_bit_widths:
+    type: enum_set
+    values: [Q2, Q3, Q4, bypass_16]
+    default: [Q2, Q3, Q4, bypass_16]
+    trade_offs:
+      supporting_all:
+        verification_tests: +6   # additional mode-coverage tests
+        area_impact: negligible
+        research_value: "bit-width sweep is a paper table"
+      supporting_Q4_only:
+        verification_tests: -6
+        area_impact: -0.002 mm²
+        research_value: "weaker characterization story"
+    recommendation: support_all
+
+  outlier_detection_lane:
+    type: bool
+    values: [true, false]
+    default: false
+    trade_offs:
+      true:
+        area_mm2: +0.02
+        verification_tests: +8
+        quality_improvement: "~0.1 PPL on outlier-heavy layers"
+      false:
+        area_mm2: 0
+        verification_tests: 0
+        quality_improvement: 0
+    recommendation: false
+    rationale: >
+      For A2, outlier detection adds complexity without fundamentally
+      changing the algorithm. Save this knob for A3⁺ / A4-lean where the
+      Oaken-style outlier lane has more synergy with rotation.
+
+  clock_target_mhz:
+    type: int
+    values: [25, 50, 100]
+    default: 50
+    trade_offs:
+      25:
+        timing_margin: "~8x margin; essentially zero risk"
+        throughput_mb_per_s: 100
+        recommendation: fallback_only
+      50:
+        timing_margin: "~4x margin"
+        throughput_mb_per_s: 200
+        recommendation: default
+      100:
+        timing_margin: "~2x margin"
+        throughput_mb_per_s: 400
+        recommendation: stretch_only
+        requires: extra_pipeline_register_between_SRAM_and_logic
+
+  asymmetric_mode:
+    type: bool
+    values: [true, false]
+    default: false
+    trade_offs:
+      true:
+        area_mm2: +0.005 (zero-point storage and subtract)
+        verification_tests: +3
+        quality_improvement: "small; ~0.05 PPL for quantized values"
+      false:
+        area_mm2: 0
+    recommendation: false
+    rationale: Symmetric is sufficient for KV cache; asymmetric is complexity without payoff.
+
+# ----------------------------------------------------------------------------
+# Capabilities (end-to-end, as seen from host)
+# ----------------------------------------------------------------------------
+capabilities:
+  on_chip_kv_tokens_4bank_q4: 819
+  on_chip_kv_tokens_4bank_q2: 1365
+  on_chip_kv_tokens_6bank_q4: 1228
+  on_chip_kv_tokens_6bank_q2: 2048
+  on_chip_dot_product: false
+  on_chip_eviction: false
+  on_chip_dma: false
+  on_chip_page_table: false
+  host_can_run_attention_standalone: false
+  host_responsibilities:
+    - token_importance_scoring
+    - eviction_decisions
+    - address_table_management
+    - off_chip_dma_via_wishbone
+    - full_attention_compute_softmax_mlp_everything_except_compression
+
+# ----------------------------------------------------------------------------
+# Verification summary
+# ----------------------------------------------------------------------------
+verification:
+  tests_estimate: 61
+  tests_source: PRD-v1-prudent.md §11
+  person_months_estimate: 9
+  effort_multiplier_note: >
+    Assumes 4–6 working days per test case including debug loops. Golden
+    model developed FIRST in Phase 0; every test compares RTL output to
+    golden bit-exactly.
+  ci_gates:
+    - verilator_lint_zero_warnings
+    - cocotb_full_regression_pass
+    - coverage_line_and_toggle_and_fsm_state
+
+# ----------------------------------------------------------------------------
+# Fit scoring against _shared/evaluation_axes.yaml
+# ----------------------------------------------------------------------------
+fit_scoring:
+  tapeout_feasibility: 10
+  functional_correctness_confidence: 9
+  research_novelty: 5
+  compression_ratio: 6
+  quality_preservation: 5
+  area_efficiency: 6
+  scalability_to_new_node: 9
+  default_weighted_total: 7.85
+
+# ----------------------------------------------------------------------------
+# A2-specific risks (shared risks in _shared/shared_risks.yaml)
+# ----------------------------------------------------------------------------
+risks:
+  - id: R-A2-01
+    severity: medium
+    category: research_value
+    description: Research contribution is thin if this is all we build
+    evidence: TurboQuant [C-01] and Oaken [C-10] moved the frontier in 2025-26
+    mitigation: Accept; position as "open-source fabrication demonstration"
+  - id: R-A2-02
+    severity: low
+    category: quality
+    description: INT4 without rotation degrades on outlier-heavy layers
+    evidence: GEAR [C-04]
+    mitigation: Accept; characterize post-silicon; report honestly
+
+# ----------------------------------------------------------------------------
+# Open questions
+# ----------------------------------------------------------------------------
+open_questions:
+  - id: Q-A2-01
+    question: >
+      Is asymmetric quantization worth supporting even as an unused mode,
+      to leave the door open for post-silicon exploration?
+    impact: small; adds ~0.005 mm² and 3 tests
+    recommendation: no
+
+  - id: Q-A2-02
+    question: >
+      Should the outlier-detection CSR threshold be exposed to software
+      even if the outlier-lane hardware is omitted?
+    impact: trivial; just read/write a CSR
+    recommendation: yes (future-compatibility cheap)
+
+# ----------------------------------------------------------------------------
+# Critical decisions — must be resolved before PRD can be finalized
+# ----------------------------------------------------------------------------
+critical_decisions:
+  - id: D-A2-01
+    decision: Final SRAM bank count for RTL freeze
+    options: [4, 6]
+    recommendation: 4_for_rtl_freeze_6_as_stretch_in_PD
+    deadline: 2027-06  # Phase 3a decision point
+    gate: Phase 3a place-and-route experiment with 4 banks clean
+
+  - id: D-A2-02
+    decision: Group size (32 vs 64)
+    options: [32, 64]
+    recommendation: 32
+    deadline: 2026-05  # PRD freeze
+    gate: golden-model characterization with real KV data
+
+  - id: D-A2-03
+    decision: Whether to include Q2 mode (not just Q4)
+    options: [Q4_only, Q4_plus_Q3_plus_Q2]
+    recommendation: Q4_plus_Q3_plus_Q2
+    deadline: 2026-05
+    rationale: adds 6 tests, 0 mm², enables bit-width sweep paper section

@@ -1,0 +1,550 @@
+# ============================================================================
+# A4-lean — Full 4-block stack with TurboQuant (no DMA)
+# ============================================================================
+# Everything A3⁺ has, PLUS the three blocks from PRD.md (Token Importance
+# Unit, Memory Hierarchy Controller, Attention Compute Unit). DMA engine
+# explicitly EXCLUDED — host moves bytes via Wishbone. This is the "max
+# ambition that still ships" target.
+#
+# A4-lean is the union of A3⁺ (compression + compressed-domain Q·K) and
+# the hardware-managed eviction/paged-KV/attention-scoring blocks from A1.
+# It is the closest candidate to the full LASSO vision while keeping the
+# verification budget within the 12-calendar-month student-team window.
+# ============================================================================
+
+id: A4lean
+name: Full-stack LASSO — 4-block with TurboQuant, no DMA
+tier: stretch
+status: candidate
+one_line_summary: >
+  Full 4-block LASSO (KV Engine + TIU + MHC + ACU) with TurboQuant
+  compression, compressed-domain attention scoring, and hardware eviction
+  policy. DMA deliberately excluded; host handles off-chip movement.
+
+depends_on:
+  shared:
+    process: _shared/process.yaml
+    citations: _shared/citations.yaml
+    evaluation: _shared/evaluation_axes.yaml
+    shared_risks: _shared/shared_risks.yaml
+    algorithms: _shared/algorithms.yaml
+  algorithm_ids:
+    primary: turboquant
+    extended: turboquant_qjl
+    alternative_codebook: fp4_e2m1_as_codebook
+    fallback_modes: [hadamard_int4, int4_uniform]
+  inherits_from: A3plus_turboquant_extended.yaml
+  draws_from: ../../PRD.md (original 4-block vision)
+
+# ----------------------------------------------------------------------------
+# Research narrative
+# ----------------------------------------------------------------------------
+research_narrative:
+  paper_title_candidate: >
+    LASSO — A Full-Stack KV Cache Coprocessor with TurboQuant Compression,
+    Hardware Token Importance Scoring, and Compressed-Domain Attention
+    on Open-Source SKY130
+  novelty_strength: 10
+  comparable_prior_art: [C-01, C-03, C-10]
+  differentiation: >
+    Beyond all A3⁺ claims, A4-lean adds:
+      (e) First silicon implementation of hardware attention-based token
+          importance scoring (Titanus [C-03] is simulation only).
+      (f) First silicon page table for KV cache management (vLLM-style
+          PagedAttention concept in hardware).
+      (g) End-to-end attention decode on compressed KV without leaving the
+          chip: host sends Q, chip returns top-K attention scores.
+
+  honest_framing: >
+    This is the most ambitious LASSO variant that preserves a viable GDSII
+    path. A4-lean intentionally DROPS the DMA engine that A1 had. DMA
+    verification is the single largest sink (~8 person-months, ~40 tests)
+    and the research value is low — "streaming bytes between SRAM and
+    off-chip memory" is plumbing, not a contribution. Host moves bytes.
+
+# ----------------------------------------------------------------------------
+# Hardware blocks
+# ----------------------------------------------------------------------------
+blocks:
+
+  - id: kv_cache_engine_turboquant_extended
+    function: >
+      Inherits A3⁺ KV Cache Engine (TurboQuant + QJL + FP4 codebook mode +
+      compressed-domain Q·K via LUT).
+    area_mm2: 0.22
+    verification_tests: 118
+    risk: medium
+
+  - id: token_importance_unit
+    function: >
+      Per-token running score accumulator backed by a small register file
+      (256 entries) or SRAM partition (up to 2048 entries). 8-wide comparator
+      tree finds bottom-K tokens on eviction trigger. Attention-sink
+      protection (first N tokens never evicted). CSR-selectable policy
+      (bottom-K, probabilistic).
+    area_mm2: 0.03
+    area_source: PRD.md §6 + expansion for probabilistic mode
+    verification_tests: 25
+    risk: medium
+    internal_primitives:
+      score_register_file_bytes: 2048   # 1024 entries × 16b for baseline
+      comparators_16bit: 70             # 8-wide comparator tree + merge logic
+      lfsr_for_probabilistic_mode: 1
+
+  - id: memory_hierarchy_controller
+    function: >
+      Page table for SRAM bank management: 256 entries, each tagged with
+      (token_id, bank, addr, bit_width_mode, importance_class). Handles
+      writebacks on eviction and read lookups on attention-compute requests.
+      Interfaces with Wishbone for host-mediated off-chip streaming.
+    area_mm2: 0.04
+    verification_tests: 35
+    risk: medium_high
+    internal_primitives:
+      page_table_entries: 256
+      cam_or_set_associative_lookup: 2_way_set_associative
+      entry_width_bits: 64
+
+  - id: attention_compute_unit
+    function: >
+      32-wide Q·K dot product supporting two modes: (A) dequantize-first
+      then multiply (for high-accuracy scoring), (B) compressed-domain
+      inner product via codebook LUT (inherited from A3⁺). Mode
+      selectable via CSR. Returns top-K attention scores to host.
+    area_mm2: 0.08
+    verification_tests: 40   # includes compressed-domain mode tests
+    risk: medium
+    internal_primitives:
+      multipliers_16x16: 32    # for Mode A
+      adder_tree_width: 5
+      accumulator_bits: 32
+      compressed_domain_lut_path: inherits_from_kv_engine
+
+  - id: sram_buffer_controller
+    function: >
+      Wishbone B4 slave, CSR file (substantially larger than A3⁺ due to
+      TIU+MHC+ACU configuration and status), inter-block arbitration,
+      interrupt, scan chain.
+    area_mm2: 0.04
+    verification_tests: 28
+    risk: low
+
+  - id: sram_subsystem
+    function: 6-8 banks of CF_SRAM_16384x32
+    area_mm2: 5.25_to_7.00
+    verification_tests: 5
+    risk: low
+
+# ----------------------------------------------------------------------------
+# Resource summary (baseline: 6 banks)
+# ----------------------------------------------------------------------------
+resource_summary:
+  logic_area_mm2: 0.41
+  sram_area_mm2: 5.25
+  physical_overhead_mm2: 1.60
+  total_mm2_6bank: 7.26
+  total_mm2_8bank: 9.01
+  caravel_user_area_mm2: 10.28
+  headroom_6bank_mm2: 3.02
+  headroom_8bank_mm2: 1.27
+  physical_design_risk_at_8bank: elevated_due_to_routing_congestion
+
+# ============================================================================
+# DESIGN SPACE — A4-lean adds TIU, MHC, ACU knobs on top of A3⁺'s
+# ============================================================================
+design_space:
+
+  # Inherited from A3⁺
+  sram_bank_count:
+    inherits_from: A3plus_turboquant_extended.yaml.design_space.sram_bank_count
+    default: 6
+  hadamard_size:
+    inherits_from: A3plus_turboquant_extended.yaml.design_space.hadamard_size
+  codebook_sharing:
+    inherits_from: A3plus_turboquant_extended.yaml.design_space.codebook_sharing
+  qjl_residual_stage:
+    inherits_from: A3plus_turboquant_extended.yaml.design_space.qjl_residual_stage
+  alternate_codebook_modes:
+    inherits_from: A3plus_turboquant_extended.yaml.design_space.alternate_codebook_modes
+
+  # A4-lean specific: Token Importance Unit knobs
+  tiu_max_tokens_tracked:
+    type: int
+    values: [256, 512, 1024, 2048]
+    default: 1024
+    trade_offs:
+      256:
+        score_storage_bytes: 512
+        score_storage_type: register_file
+        area_mm2: 0.01
+        quality_impact: "too small for meaningful KV eviction demos"
+      512:
+        score_storage_bytes: 1024
+        score_storage_type: register_file
+        area_mm2: 0.015
+        quality_impact: "adequate for small demos"
+      1024:
+        score_storage_bytes: 2048
+        score_storage_type: register_file_or_sram_partition
+        area_mm2: 0.02
+        quality_impact: "right-sized for 1-3B model demos"
+      2048:
+        score_storage_bytes: 4096
+        score_storage_type: sram_partition_required
+        area_mm2: 0.03
+        quality_impact: "larger context windows possible; partition eats 1 bank"
+    recommendation: 1024
+    rationale: >
+      1024 tokens matches the token capacity at Q2-TurboQuant in 6 banks.
+      Larger TIU doesn't help if SRAM can't hold the tokens anyway.
+
+  tiu_eviction_policy:
+    type: enum
+    values: [bottom_k_only, bottom_k_plus_probabilistic]
+    default: bottom_k_plus_probabilistic
+    trade_offs:
+      bottom_k_only:
+        area_mm2: 0.02
+        verification_tests: 15
+        research_value: "simplest baseline"
+      bottom_k_plus_probabilistic:
+        area_mm2: 0.025   # adds LFSR and probability compare
+        verification_tests: 20
+        research_value: >
+          BalanceKV-inspired; enables comparison in paper between
+          deterministic and probabilistic eviction on same silicon
+    recommendation: bottom_k_plus_probabilistic
+    rationale: "+5 tests, ~0.005 mm² for an additional characterization axis."
+
+  tiu_attention_sink_count:
+    type: int
+    values: [0, 4, 8, 16]
+    default: 4
+    trade_offs:
+      0:
+        area_impact: -0.002
+        quality_impact: "may lose quality on layers with strong attention-sink phenomenon"
+      4:
+        area_impact: 0 (baseline)
+        quality_impact: "matches MiKV recommendation"
+      8:
+        area_impact: +0.001
+        quality_impact: "slight improvement on long-context tasks"
+      16:
+        area_impact: +0.003
+        quality_impact: "marginal"
+    recommendation: 4
+
+  # A4-lean specific: Memory Hierarchy Controller knobs
+  mhc_page_table_size:
+    type: int
+    values: [128, 256, 512]
+    default: 256
+    trade_offs:
+      128:
+        area_mm2: 0.02
+        verification_tests: 25
+        capability: "matches 1024-token workload; tight"
+      256:
+        area_mm2: 0.04
+        verification_tests: 35
+        capability: "2048 tokens; comfortable"
+      512:
+        area_mm2: 0.08
+        verification_tests: 50
+        capability: "over-provisioned for 6-bank SRAM; wasteful"
+    recommendation: 256
+
+  mhc_page_table_type:
+    type: enum
+    values: [direct_mapped, 2_way_set_associative, fully_associative_cam]
+    default: 2_way_set_associative
+    trade_offs:
+      direct_mapped:
+        area_mm2: 0.03
+        verification_tests: 25
+        capability: "conflict misses under varied access patterns"
+      2_way_set_associative:
+        area_mm2: 0.04
+        verification_tests: 35
+        capability: "reduces conflicts; standard choice"
+      fully_associative_cam:
+        area_mm2: 0.12
+        verification_tests: 55
+        capability: "no conflicts; expensive CAM hardware"
+    recommendation: 2_way_set_associative
+
+  # A4-lean specific: Attention Compute Unit knobs
+  acu_width:
+    type: int
+    values: [16, 32, 64]
+    default: 32
+    trade_offs:
+      16:
+        area_mm2: 0.04
+        throughput_reduction: 0.5x
+        timing_margin_at_50mhz: 8x
+      32:
+        area_mm2: 0.08
+        throughput: baseline
+        timing_margin_at_50mhz: 4x
+      64:
+        area_mm2: 0.20
+        throughput: 2x
+        timing_margin_at_50mhz: 2x
+        floorplan_risk: "larger adder tree stresses PD"
+    recommendation: 32
+    rationale: "Match KV Engine width; balanced throughput and area."
+
+  acu_modes:
+    type: enum_set
+    values: [mode_a_dequant_first, mode_b_compressed_domain]
+    default: [mode_a_dequant_first, mode_b_compressed_domain]
+    trade_offs:
+      mode_a_only:
+        area_mm2: 0.06
+        verification_tests: 25
+      mode_b_only:
+        area_mm2: 0.04
+        verification_tests: 20
+      both:
+        area_mm2: 0.08
+        verification_tests: 40
+        research_value: "characterization comparison of the two attention modes"
+    recommendation: both
+    rationale: "Direct silicon comparison is the paper's strongest single table."
+
+  acu_accumulator_bits:
+    type: int
+    values: [24, 32, 40]
+    default: 32
+    trade_offs:
+      24:
+        area_mm2: 0.002 smaller
+        overflow_risk: "possible for long sequences"
+      32:
+        area_mm2: baseline
+        overflow_risk: "negligible for 2048-token workloads"
+      40:
+        area_mm2: +0.002
+        overflow_risk: "zero"
+    recommendation: 32
+
+  dma_engine:
+    type: bool
+    values: [false]   # only false allowed for A4-lean; A4-full would have true
+    default: false
+    trade_offs:
+      false:
+        area_mm2: 0
+        verification_tests: 0
+        research_value: "host moves bytes via Wishbone — standard pattern"
+    rationale: >
+      DMA engine adds ~0.10 mm² and ~40 tests (~8 person-months). The
+      research claim is weak; host-driven byte movement is the standard
+      approach and documenting it is enough. A4-FULL variant (not in this
+      candidate set) would re-add DMA.
+
+# ----------------------------------------------------------------------------
+# Capabilities
+# ----------------------------------------------------------------------------
+capabilities:
+  on_chip_kv_tokens_6bank_turboquant_3bit: 1575
+  on_chip_kv_tokens_6bank_turboquant_qjl_4_5bit: 1228
+  on_chip_kv_tokens_6bank_nvfp4: 1228
+  on_chip_kv_tokens_6bank_hadamard_int4: 1228
+  on_chip_dot_product: true             # full ACU
+  on_chip_compressed_domain_qk: true    # from A3⁺ LUT form
+  on_chip_token_importance_scoring: true
+  on_chip_eviction: true                # bottom-K or probabilistic
+  on_chip_page_table: true              # 256 entries, 2-way set associative
+  on_chip_attention_sink_protection: true
+  on_chip_dma: false                    # deliberately omitted
+  host_can_run_attention_standalone: true  # chip returns attention scores
+  host_responsibilities:
+    - codebook_precomputation_offline
+    - softmax_over_attention_scores
+    - v_weighting_and_final_sum
+    - mlp_and_ffn
+    - off_chip_byte_movement_when_needed_via_wishbone
+
+# ----------------------------------------------------------------------------
+# Verification
+# ----------------------------------------------------------------------------
+verification:
+  tests_estimate: 251
+  person_months_estimate: 42
+  breakdown:
+    kv_cache_engine_extended: 118
+    token_importance_unit: 25
+    memory_hierarchy_controller: 35
+    attention_compute_unit: 40
+    sram_buffer_controller: 28
+    sram_subsystem: 5
+  integration_tests_above_unit_tests: 30   # inter-block interaction tests
+  notes: >
+    At 42 person-months against 48-60 person-month team capacity, A4-lean
+    is at 70-87% budget utilization with zero slack for schedule slippage.
+    This is the threshold of feasibility.
+
+# ----------------------------------------------------------------------------
+# Fit scoring
+# ----------------------------------------------------------------------------
+fit_scoring:
+  tapeout_feasibility: 6
+  functional_correctness_confidence: 7
+  research_novelty: 10
+  compression_ratio: 9
+  quality_preservation: 9
+  area_efficiency: 8
+  scalability_to_new_node: 10
+  default_weighted_total: 8.00
+
+# ----------------------------------------------------------------------------
+# A4-lean-specific risks
+# ----------------------------------------------------------------------------
+risks:
+  - id: R-A4L-01
+    severity: high
+    category: verification_burden
+    description: >
+      42 person-months of verification at 4-person team × 12 months is ~87%
+      budget utilization with zero margin
+    mitigation:
+      - Require 5+ person team before committing to A4-lean
+      - >
+        Hard cutoff at RTL freeze (Feb 2027) — any incomplete block means
+        automatic fallback to A3⁺
+      - FPGA prototype of cross-block interactions by Dec 2026 is mandatory
+
+  - id: R-A4L-02
+    severity: high
+    category: cross_block_interactions
+    description: >
+      4-block inter-block state is the category of bug that kills tape-outs.
+      Token scores feed eviction which feeds page table which feeds writeback
+      which touches every other block.
+    mitigation:
+      - Design block interfaces with STRICT AXI-Stream-style valid/ready
+      - Each inter-block signal asserted in a unit test before being relied on
+      - Integration tests start ONLY after all unit tests pass
+
+  - id: R-A4L-03
+    severity: medium
+    category: physical_design
+    description: >
+      4 logic blocks + 6-8 SRAM macros + power grid + clock tree is much
+      harder to floorplan than A3⁺'s 1 logic block
+    mitigation:
+      - Phase 3 must start with 6 SRAM + 1 unified logic region
+      - Floorplanner should treat all 4 logic blocks as a single merged region
+      - Hierarchical synthesis only if needed for timing closure
+
+  - id: R-A4L-04
+    severity: medium
+    category: algorithm_scope
+    description: >
+      Compressed-domain Q·K mathematical claim applies cleanly to KV Engine
+      but may have subtle interactions with Attention Compute Unit's Mode A/B
+      selection
+    mitigation: >
+      Golden model has separate Python implementations for Mode A (dequant
+      first) and Mode B (compressed-domain). Compare both against reference
+      float implementation at bit-exact level.
+
+  - id: R-A4L-05
+    severity: low
+    category: attention_sink
+    description: >
+      Attention-sink protection count is a hard-coded CSR; models with
+      unusual sink patterns may not be well-served
+    mitigation: Expose as CSR (0-16); default 4 per MiKV recommendation
+
+# ----------------------------------------------------------------------------
+# Open questions
+# ----------------------------------------------------------------------------
+open_questions:
+  - id: Q-A4L-01
+    question: TIU score storage — register file vs SRAM partition?
+    status: architecture_decision_pending
+    impact: 0.01 mm² and whether eviction blocks can be verified independently
+    recommendation: register_file_for_1024_tokens_and_below
+    deadline: 2026-06
+
+  - id: Q-A4L-02
+    question: >
+      MHC page table entry width — 64 bits (token_id, bank, addr, mode) vs
+      128 bits (adds timestamp, access count)?
+    impact: area; 128b doubles table area
+    recommendation: 64_bit_entries
+
+  - id: Q-A4L-03
+    question: >
+      Should A4-lean support run-time switching between TurboQuant modes
+      ACROSS pages (mixed precision in same session)?
+    impact: >
+      adds MHC bit-width field per entry; slight verification tax
+    recommendation: yes_per_entry_bit_width
+    rationale: >
+      Enables Oaken-style "important tokens at 4 bits, unimportant at 2 bits"
+      demonstration on same silicon.
+
+  - id: Q-A4L-04
+    question: FPGA prototype requirement before RTL freeze?
+    impact: adds ~2 months of work but dramatically de-risks cross-block bugs
+    recommendation: yes_mandatory_by_Dec_2026
+    status: program_decision
+
+# ----------------------------------------------------------------------------
+# Critical decisions
+# ----------------------------------------------------------------------------
+critical_decisions:
+  - id: D-A4L-01
+    decision: Team size for A4-lean commitment
+    options: [4_people, 5_people, 6_people]
+    recommendation: 5_or_more
+    deadline: 2026-05
+    gate: "if 4 people, fall back to A3⁺ automatically"
+
+  - id: D-A4L-02
+    decision: FPGA prototype before RTL freeze
+    options: [yes, no]
+    recommendation: yes
+    deadline: 2026-07  # gives 5 months to complete FPGA work before RTL freeze
+    gate: Phase 1b FPGA demo showing cross-block interactions work
+
+  - id: D-A4L-03
+    decision: TIU eviction policy support
+    options: [bottom_k_only, bottom_k_plus_probabilistic]
+    recommendation: bottom_k_plus_probabilistic
+    deadline: 2026-05
+    rationale: +5 tests for significant additional characterization axis
+
+  - id: D-A4L-04
+    decision: ACU mode support
+    options: [mode_a_only, mode_b_only, both]
+    recommendation: both
+    deadline: 2026-05
+
+  - id: D-A4L-05
+    decision: Mixed-precision-per-page support in MHC
+    options: [single_mode_per_chip_session, per_page_mode_selection]
+    recommendation: per_page_mode_selection
+    deadline: 2026-05
+    rationale: Oaken-style mixed precision is a strong research claim
+
+  - id: D-A4L-06
+    decision: Hard fallback rule
+    options:
+      - if_any_block_incomplete_at_rtl_freeze_fall_back_to_A3plus
+      - continue_and_accept_schedule_slip
+    recommendation: fall_back_to_A3plus
+    deadline: Feb 2027 RTL freeze
+    rationale: >
+      A3⁺ shares physical shell with A4-lean; the fallback is a file-system
+      revert, not a silicon redesign. The rule must be a hard cutoff to
+      protect the tape-out.
+
+  - id: D-A4L-07
+    decision: Inherit all A3⁺ critical decisions
+    reference: A3plus_turboquant_extended.yaml.critical_decisions

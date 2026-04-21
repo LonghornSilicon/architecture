@@ -1,0 +1,142 @@
+# ============================================================================
+# Shared process and physical constants for the LASSO tape-out
+# ============================================================================
+# These values are fixed by the target shuttle (Efabless chipIgnite, SKY130)
+# and the selected SRAM IP (CF_SRAM_16384x32). Every architecture file in
+# archs/ references this file rather than duplicating the constants.
+#
+# DO NOT override these in a per-arch file unless you have measured a real
+# value during OpenLane Phase 0 validation that contradicts what's here.
+# ============================================================================
+
+metadata:
+  name: LASSO process constants
+  version: 1.0
+  last_updated: 2026-04-21
+  rationale_document: ../../design-rationale.md
+
+# ----------------------------------------------------------------------------
+# Target process and shuttle
+# ----------------------------------------------------------------------------
+process:
+  node: SKY130
+  feature_size_nm: 130
+  foundry: SkyWater Technology Foundry
+  shuttle_program: Efabless chipIgnite
+  supply_voltage_v: 1.8
+  metal_layers: 5
+  poly_pitch_nm: 150           # typical
+  toolchain_flow: OpenLane 2
+  pdk_reference: skywater-pdk
+
+# ----------------------------------------------------------------------------
+# Caravel user-project-wrapper physical dimensions
+# ----------------------------------------------------------------------------
+# Source: Caravel Harness documentation (caravel-harness.readthedocs.io),
+# Efabless Caravel GitHub (github.com/efabless/caravel)
+caravel_user_area:
+  width_um: 2920
+  height_um: 3520
+  total_area_mm2: 10.28        # 2.92 × 3.52
+  gpio_pads_count: 38          # supplied by harness; user pays no area
+  power_pads_count: 4
+  i_o_interface: Wishbone B4 slave
+  wishbone_width_bits: 32
+  caravel_host_cpu: PicoRV32 @ ~40 MHz (optional, present on harness)
+
+# ----------------------------------------------------------------------------
+# Usable area after unavoidable physical-design overhead
+# ----------------------------------------------------------------------------
+# Assumes a first-tapeout student team at 130nm; these are conservative.
+# A tighter floorplan could reclaim ~0.5–1.0 mm² but not worth optimizing
+# in Phase 0.
+area_overhead:
+  power_ring_mm2: 0.50         # ~100 µm thick perimeter
+  clock_tree_mm2: 0.30         # grows with logic area
+  routing_channels_mm2: 0.50   # between SRAM macros and logic
+  macro_keepout_halos_mm2: 0.30  # macro-to-macro spacing
+  total_overhead_mm2: 1.60
+  usable_area_mm2: 8.68        # 10.28 − 1.60
+
+# ----------------------------------------------------------------------------
+# Density rules
+# ----------------------------------------------------------------------------
+density:
+  standard_cells:
+    library: sky130_fd_sc_hd
+    raw_gates_per_mm2: 266000       # theoretical max
+    routed_gates_per_mm2: 160000    # achievable post-PnR
+    cell_utilization_target_pct: 60 # typical OpenLane target; 70% is aggressive
+    source: skywater-pdk.readthedocs.io
+  sram_small_openram_1kb:
+    dimensions_um: [479.78, 397.5]
+    area_mm2: 0.191
+    density_kb_per_mm2: 5.2
+    notes: small macros pay a large fixed cost for decoders and sense amps
+  sram_cf_sram_16384x32:
+    dimensions_estimate_um: [1100, 800]
+    dimensions_estimate_note: >
+      Estimated from typical 64 KB SKY130 macro aspect ratios. Exact
+      dimensions should be confirmed in OpenLane during Phase 0 validation.
+      Estimate assumes roughly 5:3.5 width:height ratio.
+    area_mm2: 0.875
+    bytes_per_macro: 65536
+    density_kb_per_mm2: 73
+    ports: 1 read-write
+    read_latency_ns: 3.0
+    read_latency_source: design-rationale.md §"Why 50MHz Clock Target"
+    source_repo: github.com/LonghornSilicon/SRAM_16384x32
+
+# ----------------------------------------------------------------------------
+# Clock targets
+# ----------------------------------------------------------------------------
+clock_targets:
+  target_mhz: 50
+  stretch_mhz: 100
+  fallback_mhz: 25
+  rationale: >
+    50 MHz gives ~4x margin on SRAM read and on the deepest combinational
+    path (Walsh-Hadamard). 100 MHz is feasible with a pipeline register
+    between SRAM read and logic input, but must be proven in Phase 0. The
+    25 MHz fallback is the safety net if timing closure is contested.
+
+# ----------------------------------------------------------------------------
+# Team and calendar capacity
+# ----------------------------------------------------------------------------
+team_capacity:
+  headcount_min: 4
+  headcount_target: 5
+  calendar_window_rtl_verif_months: 12
+  person_months_per_calendar_month_typical: 4    # for 4-person team
+  person_months_budget_total: 48                 # 4 × 12 (conservative; 5-person team = 60 PM)
+  person_months_budget_generous: 60              # 5 × 12
+  notes: >
+    Person-month estimates in per-arch files assume student-team velocity —
+    approximately 4–6 working days per test case including debug loops.
+    Seasoned industry teams would be 2–3x faster.
+
+# ----------------------------------------------------------------------------
+# Shuttle schedule
+# ----------------------------------------------------------------------------
+schedule:
+  prd_freeze_target: 2026-05
+  phase_0_golden_model_complete: 2026-08
+  rtl_freeze_baseline_target: 2027-02
+  stretch_window_close: 2027-04
+  gdsii_submission_deadline: 2027-11
+  silicon_return_estimate: 2028-01
+  bring_up_and_demo_window: 2028-03_to_2028-05
+
+# ----------------------------------------------------------------------------
+# Host interface constraints
+# ----------------------------------------------------------------------------
+host_interface:
+  bus: Wishbone B4
+  byte_enable_support: true
+  caravel_compatible: true
+  wishbone_master_available_on_caravel: true   # used for DMA stretch goals
+  effective_bandwidth_mb_per_s: 200
+  effective_bandwidth_note: >
+    200 MB/s at 50 MHz with 32-bit word and single-cycle ACK. Caravel
+    management SoC caps external bus at ~40 MHz which is a lower ceiling
+    for host round-trips. Internal throughput is not the bottleneck.

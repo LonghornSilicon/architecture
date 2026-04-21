@@ -1,0 +1,142 @@
+# ============================================================================
+# Evaluation axes for comparing LASSO architecture candidates
+# ============================================================================
+# Each axis is weighted for the default decision matrix in ../../archs.yaml.
+# Per-arch files score themselves 1–10 on each axis; higher is better except
+# where noted.
+#
+# These weights reflect current program priorities (tape-out feasibility
+# dominates; research novelty is secondary but material). Change weights
+# only with explicit justification.
+# ============================================================================
+
+metadata:
+  name: Architecture evaluation axes
+  version: 1.0
+  last_updated: 2026-04-21
+
+weighting_philosophy: >
+  The #1 risk to any student tape-out is failing to tape out. Tape-out
+  feasibility and functional correctness together account for 55% of the
+  default weighting. Research novelty is important because a working chip
+  that just re-demonstrates a 2022 algorithm is less valuable than a working
+  chip that demonstrates a 2026 algorithm — but novelty cannot compensate
+  for a chip that doesn't ship.
+
+axes:
+
+  - id: tapeout_feasibility
+    weight: 0.30
+    direction: higher_is_better
+    scale_1_10:
+      1: "will almost certainly miss GDSII deadline"
+      5: "60% chance of on-time GDSII"
+      10: "essentially guaranteed to ship"
+    evidence_basis: verification test count, person-month estimates vs team capacity, physical-design complexity
+
+  - id: functional_correctness_confidence
+    weight: 0.25
+    direction: higher_is_better
+    scale_1_10:
+      1: "silicon likely returns with serious bugs"
+      5: "silicon likely works for the core function but has gotchas"
+      10: "high confidence silicon works as specified"
+    evidence_basis: algorithmic complexity, precedent in prior silicon, golden-model bit-exactness feasibility
+
+  - id: research_novelty
+    weight: 0.15
+    direction: higher_is_better
+    scale_1_10:
+      1: "re-implementation of a known open-source design"
+      5: "correct + publishable at workshop tier"
+      10: "first-of-kind silicon claim defensible at top-tier venue"
+    evidence_basis: comparable prior art review, differentiation rigor
+
+  - id: compression_ratio
+    weight: 0.10
+    direction: higher_is_better
+    scale_1_10:
+      1: "no compression"
+      5: "4x vs FP16 (INT4 baseline)"
+      10: "6x+ vs FP16 (sub-3-bit effective)"
+    evidence_basis: bits-per-element × payload-plus-overhead
+
+  - id: quality_preservation
+    weight: 0.10
+    direction: higher_is_better
+    scale_1_10:
+      1: "PPL delta > 2.0 (serious degradation)"
+      5: "PPL delta 0.3–0.5 (INT4-class)"
+      10: "PPL delta < 0.15 (near-lossless)"
+    inversion_note: >
+      Unlike most axes, we score this 1–10 on a rescaled inverse of the raw
+      PPL delta. So "9 in quality_preservation" means the raw PPL delta is
+      very small. Do NOT interpret this as "higher PPL is better."
+
+  - id: area_efficiency
+    weight: 0.05
+    direction: higher_is_better
+    scale_1_10:
+      1: "die is 10%+ unused after placement"
+      5: "utilization ~70%, some headroom"
+      10: "tight but not over-constrained; every mm² is earning"
+    evidence_basis: total logic + SRAM area / usable die area
+
+  - id: scalability_to_new_node
+    weight: 0.05
+    direction: higher_is_better
+    scale_1_10:
+      1: "design relies on 130nm-specific tricks; doesn't port"
+      5: "ports with 1-2 rewrites"
+      10: "re-synthesizes cleanly at 28nm with 10x performance improvement"
+    evidence_basis: architectural generality, avoidance of tech-specific workarounds
+
+weights_sum_check: 1.00
+
+# ----------------------------------------------------------------------------
+# Sensitivity-analysis variant weightings
+# ----------------------------------------------------------------------------
+# Alternative weight sets for stress-testing the decision. If an architecture
+# is Pareto-dominant across all of these, the decision is robust.
+
+sensitivity_variants:
+
+  tapeout_everything:
+    description: Reweight to emphasize shipping above all else
+    tapeout_feasibility: 0.60
+    functional_correctness_confidence: 0.20
+    research_novelty: 0.05
+    compression_ratio: 0.05
+    quality_preservation: 0.05
+    area_efficiency: 0.025
+    scalability_to_new_node: 0.025
+
+  research_novelty_everything:
+    description: Reweight for maximum publication impact
+    tapeout_feasibility: 0.15
+    functional_correctness_confidence: 0.15
+    research_novelty: 0.50
+    compression_ratio: 0.05
+    quality_preservation: 0.05
+    area_efficiency: 0.05
+    scalability_to_new_node: 0.05
+
+  quality_everything:
+    description: Reweight for near-lossless accuracy priority
+    tapeout_feasibility: 0.20
+    functional_correctness_confidence: 0.15
+    research_novelty: 0.10
+    compression_ratio: 0.10
+    quality_preservation: 0.40
+    area_efficiency: 0.025
+    scalability_to_new_node: 0.025
+
+  physical_design_everything:
+    description: Reweight for maximum physical-design safety (heavy routing margin, timing closure)
+    tapeout_feasibility: 0.40
+    functional_correctness_confidence: 0.20
+    research_novelty: 0.10
+    compression_ratio: 0.05
+    quality_preservation: 0.05
+    area_efficiency: 0.15   # higher weight: "room to breathe" matters
+    scalability_to_new_node: 0.05

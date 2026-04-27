@@ -132,13 +132,18 @@
 </p>
 
 <div class="accent">
-  <strong>What's on-die vs off-chip:</strong> the rectangle labeled "Lambda silicon" is the 4 mm² ASIC we
-  tape out — it contains 8 functional blocks plus an I/O ring. The dark box <em>below</em> the die is the
-  <strong>LPDDR5X-8533 DRAM package</strong>, a separate mobile-grade memory chip mounted on the same PCB
-  next to Lambda. The "LPDDR5X x16 PHY" block on the bottom edge of our die is just the analog interface
-  (data lanes, clocking, calibration) that drives signals out through pad-ring pins, across PCB traces,
-  and into the off-chip DRAM package. The DRAM itself — 4–8 GB of storage holding your model weights —
-  is <em>not</em> on Lambda's die.
+  <strong>Critical distinction — read this before looking at the floorplan:</strong>
+  <ul style="margin: 8px 0 0 20px;">
+    <li>The <strong>"DRAM Interface PHY"</strong> block on the bottom of the die is <em>NOT memory</em>. It's purely
+    interface circuitry — SerDes, clocking, calibration loops — that exists so the chip can <em>talk to</em>
+    off-chip DRAM. It happens to be 1.20 mm² (30% of the die) because driving 8533 Mbps signals across a
+    PCB requires real analog silicon. But it stores nothing.</li>
+    <li>The <strong>actual DRAM</strong> — the 4–8 GB of storage holding your model weights — is the dark
+    package drawn <em>below</em> the die boundary in the SVG. It's a separate LPDDR5X-8533 chip mounted on the
+    PCB next to Lambda, connected by ~24 short PCB traces (DQ × 16, DQS × 2, CK, CA × 5).</li>
+    <li>So when you see "1.20 mm² for LPDDR5X" on Lambda's die, that's the <em>cost of having an off-chip DRAM
+    bus at all</em> — not the memory itself.</li>
+  </ul>
 </div>
 
 <div class="callout">
@@ -154,7 +159,7 @@
 <h2>1. Die floorplan — Lambda v2, 4 mm² (2 × 2 mm)</h2>
 <div class="panel">
 
-<svg viewBox="0 0 620 760" width="780" height="940" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 620 880" width="780" height="1100" xmlns="http://www.w3.org/2000/svg">
 
   <defs>
     <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
@@ -173,7 +178,7 @@
     </pattern>
   </defs>
 
-  <rect width="620" height="760" fill="url(#grid)"/>
+  <rect width="620" height="880" fill="url(#grid)"/>
 
   <!-- ==================================================================== -->
   <!-- ON-DIE / OFF-CHIP boundary annotation                                 -->
@@ -199,14 +204,15 @@
 
   <!-- ============ CORE AREA: 450x450 px = 1.8 x 1.8 mm at (85, 85) ============ -->
 
-  <!-- LPDDR5X x16 PHY: bottom strip, 1.20 mm² = 1.8 mm × 0.667 mm = 450 × 167 px -->
-  <!-- This is the ON-DIE physical-layer interface — DRAM itself is off-chip below -->
+  <!-- ON-DIE PHY: bottom strip, 1.20 mm² = 1.8 mm × 0.667 mm = 450 × 167 px -->
+  <!-- IMPORTANT: This block contains NO MEMORY. It is purely interface circuitry. -->
   <rect x="85" y="368" width="450" height="167" fill="url(#phyHatch)" stroke="#374151" stroke-width="1.5"/>
-  <text x="310" y="430" text-anchor="middle" class="die-block-label" font-size="16">LPDDR5X x16 PHY <tspan font-size="11" fill="#6b7280" font-weight="400">(on-die interface only)</tspan></text>
-  <text x="310" y="450" text-anchor="middle" class="die-block-sub" font-size="11">vendor IP (Synopsys / Cadence) · 1.20 mm² · ±0.3 swing</text>
-  <text x="310" y="465" text-anchor="middle" class="die-block-sub" font-size="11">8533 Mbps × 16 lanes = 17 GB/s peak · 12 GB/s sustained</text>
-  <text x="310" y="480" text-anchor="middle" class="die-block-sub" font-size="11">DQ0–DQ15 · DQS · CK · CA · ZQ calibration · ODT</text>
-  <text x="310" y="510" text-anchor="middle" class="die-block-sub" font-size="10" font-style="italic" fill="#7c3aed">drives signals down through pads → off-chip LPDDR5X package below</text>
+  <text x="310" y="395" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#7c3aed" font-weight="700">⚠ INTERFACE CIRCUITRY ONLY — NOT MEMORY ⚠</text>
+  <text x="310" y="425" text-anchor="middle" class="die-block-label" font-size="16">DRAM Interface PHY</text>
+  <text x="310" y="445" text-anchor="middle" class="die-block-sub" font-size="11">(LPDDR5X x16 protocol; vendor IP from Synopsys / Cadence)</text>
+  <text x="310" y="465" text-anchor="middle" class="die-block-sub" font-size="11">SerDes · DQS strobes · PLL · read/write leveling · ODT · ZQ calibration</text>
+  <text x="310" y="480" text-anchor="middle" class="die-block-sub" font-size="11">1.20 mm² ±0.3 · talks to off-chip DRAM at 8533 Mbps × 16 lanes</text>
+  <text x="310" y="500" text-anchor="middle" class="die-block-sub" font-size="10" font-style="italic" fill="#7c3aed">→ all weights live in the off-chip DRAM package below; this block just drives signals to it</text>
 
   <!-- HIF (USB-C 2.0): top-right, 0.30 mm² = 145 × 130 px -->
   <rect x="390" y="85" width="145" height="130" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
@@ -312,35 +318,41 @@
   <text x="600" y="315" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b7280" transform="rotate(-90 600 315)">2.0 mm</text>
 
   <!-- ==================================================================== -->
-  <!-- OFF-CHIP region (PCB level): LPDDR5X DRAM package + USB-C connector  -->
+  <!-- OFF-CHIP region (PCB level): the actual DRAM package                 -->
   <!-- ==================================================================== -->
 
-  <!-- Boundary line separating on-die from off-chip -->
-  <line x1="60" y1="618" x2="560" y2="618" stroke="#1a1a1a" stroke-width="0.5" stroke-dasharray="4,2"/>
-  <text x="310" y="613" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#1a1a1a" font-weight="700">OFF-CHIP (mounted on the same PCB)</text>
+  <!-- Strong visual boundary -->
+  <rect x="0" y="595" width="620" height="285" fill="#fffbeb" opacity="0.5"/>
+  <line x1="60" y1="600" x2="560" y2="600" stroke="#7c3aed" stroke-width="2" stroke-dasharray="6,3"/>
 
-  <!-- Wire bundle from die's bottom edge (PHY pads) down to the LPDDR package -->
-  <!-- 16 DQ + 2 DQS + 4 CA + 1 CK = ~24 traces drawn as a single thick band -->
-  <rect x="240" y="535" width="140" height="65" fill="#fde68a" stroke="#9ca3af" stroke-width="0.5" stroke-dasharray="2,1"/>
-  <text x="310" y="555" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">~24 traces on PCB</text>
-  <text x="310" y="567" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">DQ × 16, DQS × 2, CK, CA × 5</text>
-  <text x="310" y="579" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">~5-15 mm long; impedance-matched</text>
-  <text x="310" y="592" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151" font-style="italic">(this is where signal integrity matters)</text>
+  <text x="310" y="618" text-anchor="middle" font-family="-apple-system" font-size="14" fill="#7c3aed" font-weight="700">━━━━━━ DIE BOUNDARY (everything below is OFF-CHIP) ━━━━━━</text>
+  <text x="310" y="638" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#374151" font-weight="600">↓ Mounted on the same PCB next to the Lambda die ↓</text>
 
-  <!-- Wire arrows from die bottom edge to LPDDR package -->
-  <line x1="200" y1="535" x2="200" y2="630" stroke="#9ca3af" stroke-width="1"/>
-  <line x1="240" y1="535" x2="240" y2="630" stroke="#9ca3af" stroke-width="1"/>
-  <line x1="380" y1="535" x2="380" y2="630" stroke="#9ca3af" stroke-width="1"/>
-  <line x1="420" y1="535" x2="420" y2="630" stroke="#9ca3af" stroke-width="1"/>
+  <!-- Big arrow from die's PHY block down to the off-chip DRAM, with PCB-trace bundle -->
+  <!-- Gradient-ish arrow body -->
+  <polygon points="240,650 380,650 380,705 420,705 310,750 200,705 240,705" fill="#fde68a" stroke="#7c3aed" stroke-width="2"/>
+  <text x="310" y="680" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#374151" font-weight="600">PCB traces: ~24 signals</text>
+  <text x="310" y="695" text-anchor="middle" font-family="-apple-system" font-size="10" fill="#374151">DQ × 16, DQS × 2, CK, CA × 5 · impedance-matched</text>
 
-  <!-- LPDDR5X DRAM package, off-die: drawn at scale ~10x10mm in real life,
-       represented here as a similar-size box for visual parity -->
-  <rect x="120" y="630" width="380" height="105" fill="#1f2937" stroke="#000" stroke-width="2" rx="6"/>
-  <text x="310" y="660" text-anchor="middle" font-family="-apple-system" font-size="15" fill="#fde68a" font-weight="700">LPDDR5X-8533 DRAM package (off-chip)</text>
-  <text x="310" y="678" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Micron / Samsung / SK Hynix mobile LPDDR5X · 4-8 GB capacity</text>
-  <text x="310" y="694" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Single x16 channel · 1.05 V VDDQ + 1.8 V VDD2 · BGA package</text>
-  <text x="310" y="710" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Holds: model weights (1.5 GB Llama-3.2-3B at INT4) + scratch room</text>
-  <text x="310" y="725" text-anchor="middle" font-family="-apple-system" font-size="10" fill="#9ca3af" font-style="italic">~$5-15 BoM cost; sits next to Lambda die on the same PCB / module</text>
+  <!-- LPDDR5X DRAM package — drawn BIG so the user sees it as the actual memory -->
+  <rect x="80" y="760" width="460" height="115" fill="#1f2937" stroke="#7c3aed" stroke-width="3" rx="8"/>
+
+  <!-- Memory cell pattern inside the DRAM package to make it visually different -->
+  <defs>
+    <pattern id="dramCells" patternUnits="userSpaceOnUse" width="14" height="14" x="80" y="760">
+      <rect width="14" height="14" fill="#1f2937"/>
+      <rect x="2" y="2" width="4" height="4" fill="#fde68a" opacity="0.4"/>
+      <rect x="8" y="2" width="4" height="4" fill="#fde68a" opacity="0.4"/>
+      <rect x="2" y="8" width="4" height="4" fill="#fde68a" opacity="0.4"/>
+      <rect x="8" y="8" width="4" height="4" fill="#fde68a" opacity="0.4"/>
+    </pattern>
+  </defs>
+  <rect x="90" y="770" width="440" height="60" fill="url(#dramCells)" opacity="0.5"/>
+
+  <text x="310" y="790" text-anchor="middle" font-family="-apple-system" font-size="18" fill="#fde68a" font-weight="700">📦 LPDDR5X-8533 DRAM</text>
+  <text x="310" y="810" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#fde68a" font-weight="600">(the actual memory — separate physical chip)</text>
+  <text x="310" y="844" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fef9e7">4-8 GB · Micron / Samsung / SK Hynix · BGA package · ~$5-15 BoM</text>
+  <text x="310" y="860" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fef9e7">holds the model: 1.5 GB W4 weights for Llama-3.2-3B + scratch room</text>
 
 </svg>
 
@@ -375,7 +387,7 @@
   <div class="mono">0.71 mm² (0.8 MB)</div>
 
   <div class="swatch" style="background: url(#phyHatch), white;"></div>
-  <div><strong>LPDDR5X x16 PHY</strong> — on-die analog interface (data lanes + clocking + calibration); drives signals to off-chip DRAM</div>
+  <div><strong>DRAM Interface PHY</strong> (LPDDR5X x16 protocol) — <em>on-die</em> analog circuitry that talks to off-chip DRAM. <strong>Contains zero memory storage</strong> — just SerDes, DQS strobes, PLL, calibration loops.</div>
   <div class="mono">1.20 mm²</div>
 
   <div class="swatch" style="background: url(#ringPattern);"></div>
@@ -383,7 +395,7 @@
   <div class="mono">0.76 mm²</div>
 
   <div class="swatch" style="background: #1f2937;"></div>
-  <div><strong>LPDDR5X DRAM package</strong> — <em>off-chip</em> mobile-grade DRAM (4-8 GB), mounted on PCB next to Lambda; holds model weights</div>
+  <div><strong>LPDDR5X-8533 DRAM</strong> — <em>OFF-CHIP</em>, separate physical memory package (4-8 GB) mounted on PCB next to Lambda. This is where the model weights actually live.</div>
   <div class="mono">off-die</div>
 </div>
 

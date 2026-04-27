@@ -6,7 +6,7 @@
 # compression and SRAM buffering.
 #
 # This file is the design-space exploration for A2. The committed
-# architecture specification is in ../../PRD-v1-prudent.md.
+# architecture specification is in ../../../PRDs/lasso-v1-prudent/PRD.md.
 # ============================================================================
 
 id: A2
@@ -31,7 +31,7 @@ depends_on:
   algorithm_ids:
     primary: int4_uniform
     secondary: [int2_uniform]
-  committed_prd: ../../PRD-v1-prudent.md
+  committed_prd: ../../../PRDs/lasso-v1-prudent/PRD.md
 
 # ----------------------------------------------------------------------------
 # Research narrative
@@ -62,7 +62,7 @@ blocks:
       Per-group symmetric INT2/3/4 quantization and dequantization, bit-pack
       and unpack, optional asymmetric mode, outlier detection, bypass.
     area_mm2: 0.07
-    area_source: PRD-v1-prudent.md §4
+    area_source: ../../../PRDs/lasso-v1-prudent/PRD.md §4
     verification_tests: 30
     risk: medium
     internal_primitives:
@@ -75,7 +75,7 @@ blocks:
       Wishbone B4 slave, address decode, bank arbitration, CSR register file,
       mode select (quantized / bypass / raw), interrupt, scan chain.
     area_mm2: 0.02
-    area_source: PRD-v1-prudent.md §5
+    area_source: ../../../PRDs/lasso-v1-prudent/PRD.md §5
     verification_tests: 20
     risk: low
 
@@ -249,7 +249,7 @@ capabilities:
 # ----------------------------------------------------------------------------
 verification:
   tests_estimate: 61
-  tests_source: PRD-v1-prudent.md §11
+  tests_source: ../../../PRDs/lasso-v1-prudent/PRD.md §11
   person_months_estimate: 9
   effort_multiplier_note: >
     Assumes 4–6 working days per test case including debug loops. Golden

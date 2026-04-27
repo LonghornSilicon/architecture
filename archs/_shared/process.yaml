@@ -13,7 +13,7 @@ metadata:
   name: LASSO process constants
   version: 1.0
   last_updated: 2026-04-21
-  rationale_document: ../../design-rationale.md
+  rationale_document: ../../../PRDs/lasso-v0-original/design-rationale.md
 
 # ----------------------------------------------------------------------------
 # Target process and shuttle

@@ -1,5 +1,19 @@
-# Longhorn Silicon — Architecture Design Space
+# Longhorn Silicon — Architecture Design Space (LASSO/SKY130 — ARCHIVED)
 # =============================================================================
+# STATUS as of 2026-04-26: ARCHIVED. The project pivoted from LASSO/SKY130 to
+# Lambda (Lambda) on TSMC N16FFC in late April 2026. The current chip target
+# is `archs/Lambda_25mm2.yaml`, with PRD/rationale in
+# `PRDs/lambda-v2/`. The KCE block from A3+ carries forward into Lambda; the
+# rest of LASSO is superseded.
+#
+# This file is preserved because:
+#   - The KCE inheritance reasoning (Hadamard + Lloyd-Max codebook) is still
+#     load-bearing for Lambda
+#   - The algorithm-vs-algorithm rejection rationales (FP4 arithmetic, PolarQuant)
+#     still inform Lambda decisions
+#   - Inline §-references to `PRD.md` and `PRD-v1-prudent.md` below now point to
+#     `PRDs/lasso-v0-original/PRD.md` and `PRDs/lasso-v1-prudent/PRD.md` respectively
+#
 # Purpose: Machine-readable comparison of three candidate architectures for
 #   the LASSO KV cache coprocessor tape-out. This file is the single source of
 #   truth for architectural trade-offs, grounded in specific research claims
@@ -29,10 +43,12 @@ metadata:
   classification: CONFIDENTIAL — Internal Use Only
   supersedes: null
   companions:
-    - PRD.md                  # Full 4-block vision
-    - PRD-v1-prudent.md       # Prudent 2-block baseline (A2)
-    - design-rationale.md     # Why decisions were made
-    - archs/README.md         # Per-architecture design-space exploration (A2, A3, A3⁺, A4-lean)
+    - PRDs/lasso-v0-original/PRD.md              # Full 4-block vision (archived)
+    - PRDs/lasso-v1-prudent/PRD.md               # Prudent 2-block baseline A2 (archived)
+    - PRDs/lasso-v0-original/design-rationale.md # Why decisions were made (archived)
+    - archs/README.md                            # Per-architecture design-space exploration (A2, A3, A3⁺, A4-lean)
+    - PRDs/lambda-v2/PRD.md                      # CURRENT chip target (TSMC 16nm Lambda)
+    - archs/Lambda_25mm2.yaml          # CURRENT chip YAML
 
 # -----------------------------------------------------------------------------
 # Where detailed per-architecture design spaces live
@@ -63,19 +79,19 @@ subdirectory_mapping:
     status: excluded_from_subdirectory
     reason: dominated_by_A4lean
   A2_prudent_int4:
-    file: archs/A2_prudent_int4.yaml
+    file: archs/lasso/LASSO_A2_prudent_int4.yaml
     tier: prudent
     status: fallback
   A3_turboquant_2block:
-    file: archs/A3_turboquant_minimal.yaml
+    file: archs/lasso/LASSO_A3_turboquant_minimal.yaml
     tier: ambitious
     status: candidate
   A3plus_turboquant_extended:
-    file: archs/A3plus_turboquant_extended.yaml
+    file: archs/lasso/LASSO_A3plus_turboquant_extended.yaml
     tier: ambitious
     status: proposed_sweet_spot
   A4lean_full_stack:
-    file: archs/A4lean_full_stack.yaml
+    file: archs/lasso/LASSO_A4lean_full_stack.yaml
     tier: stretch
     status: candidate
 

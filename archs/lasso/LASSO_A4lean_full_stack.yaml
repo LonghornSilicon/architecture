@@ -1,7 +1,7 @@
 # ============================================================================
 # A4-lean — Full 4-block stack with TurboQuant (no DMA)
 # ============================================================================
-# Everything A3⁺ has, PLUS the three blocks from PRD.md (Token Importance
+# Everything A3⁺ has, PLUS the three blocks from ../../../PRDs/lasso-v0-original/PRD.md (Token Importance
 # Unit, Memory Hierarchy Controller, Attention Compute Unit). DMA engine
 # explicitly EXCLUDED — host moves bytes via Wishbone. This is the "max
 # ambition that still ships" target.
@@ -34,7 +34,7 @@ depends_on:
     alternative_codebook: fp4_e2m1_as_codebook
     fallback_modes: [hadamard_int4, int4_uniform]
   inherits_from: A3plus_turboquant_extended.yaml
-  draws_from: ../../PRD.md (original 4-block vision)
+  draws_from: ../../../PRDs/lasso-v0-original/PRD.md (original 4-block vision)
 
 # ----------------------------------------------------------------------------
 # Research narrative
@@ -83,7 +83,7 @@ blocks:
       protection (first N tokens never evicted). CSR-selectable policy
       (bottom-K, probabilistic).
     area_mm2: 0.03
-    area_source: PRD.md §6 + expansion for probabilistic mode
+    area_source: ../../../PRDs/lasso-v0-original/PRD.md §6 + expansion for probabilistic mode
     verification_tests: 25
     risk: medium
     internal_primitives:

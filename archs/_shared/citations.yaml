@@ -133,7 +133,7 @@ citations:
 
   C-13:
     title: "LASSO Design Rationale (internal)"
-    local_path: ../../design-rationale.md
+    local_path: ../../../PRDs/lasso-v0-original/design-rationale.md
     load_bearing_for:
       - 130nm density rules
       - FP4 rejection rationale

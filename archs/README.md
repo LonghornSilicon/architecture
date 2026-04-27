@@ -4,9 +4,13 @@ Disaggregated per-architecture design-space exploration files. Each candidate ar
 
 **Source of truth hierarchy:**
 - This directory (`archs/*.yaml`) — per-architecture explorable design spaces with knobs
-- `../archs.yaml` (parent dir) — the master comparison + decision matrix + sensitivity analysis
-- `../PRD.md`, `../PRD-v1-prudent.md` — committed architecture specifications
-- `../design-rationale.md` — why decisions were made
+- `Lambda_25mm2.yaml` — the **current flagship** chip target (TSMC 16nm)
+- `Lambda_mini_9mm2.yaml` — Tier B fallback (3-4B class, 9 mm²)
+- `Lambda_pico_4mm2.yaml` — Tier A research vehicle (KV coprocessor, 4 mm²)
+- `../STATUS.md` — die-tier comparison and frontier analysis
+- `../PRDs/lambda-v2/PRD.md` — current Lambda PRD (TSMC 16nm)
+- `../archs.yaml` — archived LASSO/SKY130 design-space comparison
+- `../PRDs/lasso-v0-original/`, `../PRDs/lasso-v1-prudent/` — archived LASSO PRDs (SKY130)
 
 The parent `archs.yaml` is the answer to *"which architecture should we pick?"*. The files in this directory are the answer to *"for each candidate, what are the knobs, and what does sweeping them do?"*.
 
@@ -16,15 +20,20 @@ The parent `archs.yaml` is the answer to *"which architecture should we pick?"*.
 archs/
 ├── README.md                             ← this file
 ├── _shared/
-│   ├── process.yaml                      ← SKY130, Caravel, density constants
-│   ├── algorithms.yaml                   ← INT4, Hadamard-INT4, TurboQuant, FP4 specs
+│   ├── process.yaml                      ← SKY130, Caravel, density constants (LASSO archived)
+│   ├── algorithms.yaml                   ← INT4, Hadamard-INT4, TurboQuant, FP4 specs (Lambda-current)
 │   ├── citations.yaml                    ← reference-paper bibliography [C-xx]
 │   ├── evaluation_axes.yaml              ← scoring dimensions and weights
 │   └── shared_risks.yaml                 ← risks that apply to every candidate
-├── A2_prudent_int4.yaml                  ← safe fallback baseline — "always ships"
-├── A3_turboquant_minimal.yaml            ← 2-block TurboQuant — "conservative ambitious"
-├── A3plus_turboquant_extended.yaml       ← 2-block TurboQuant + QJL + compressed Q·K + FP4 mode
-└── A4lean_full_stack.yaml                ← 4-block + TurboQuant, no DMA — "max ambition that ships"
+│
+├── Lambda_25mm2.yaml                     ★ FLAGSHIP — 7-8B inference, ~25 mm² (5×5 mm), TSMC N16FFC
+├── Lambda_mini_9mm2.yaml                 graceful fallback — 3-4B inference, 9 mm² (3×3 mm)
+├── Lambda_pico_4mm2.yaml                 optional research vehicle — KV coprocessor, 4 mm² (2×2 mm)
+│
+├── A2_prudent_int4.yaml                  ← LASSO archived — safe fallback baseline (SKY130)
+├── A3_turboquant_minimal.yaml            ← LASSO archived — 2-block TurboQuant (SKY130)
+├── A3plus_turboquant_extended.yaml       ← LASSO archived — KCE inheritance source (SKY130)
+└── A4lean_full_stack.yaml                ← LASSO archived — 4-block + TurboQuant (SKY130)
 ```
 
 ## Which architectures are in this directory (and why)

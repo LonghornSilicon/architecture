@@ -20,7 +20,7 @@
 
 This PRD is organized around a **must-ship baseline** and **stretch goals**. The baseline is what we commit to taping out. Stretch goals are additive blocks that get integrated ONLY if the baseline is verified and timing-closed ahead of schedule. This structure exists because the #1 risk to this project is not architecture quality — it's failing to tape out at all.
 
-The companion document `PRD.md` (v1.0) contains the full 4-block LASSO vision. That document remains the long-term architecture target. This document is what we actually build first.
+The companion document `../lasso-v0-original/PRD.md` (v1.0) contains the full 4-block LASSO vision. That document remains the long-term architecture target *for the SKY130 line*. This document is what was originally going to ship first on SKY130. Both are now archived: see `../lambda-v2/PRD.md` for the current TSMC 16nm direction.
 
 ---
 
@@ -180,7 +180,7 @@ The core IP of the chip. Hardware-accelerated quantization and dequantization of
 
 ### Quantization Arithmetic
 
-All formats are signed integer (INTn), not floating-point. See `design-rationale.md` for the INT4 vs FP4 decision.
+All formats are signed integer (INTn), not floating-point. See `../lasso-v0-original/design-rationale.md` for the INT4 vs FP4 decision.
 
 ```
 Quantize:
@@ -867,11 +867,13 @@ Mar-May     ▓▓▓▓▓▓▓▓▓▓  PHASE 4: Bring-up + Demo
 
 ### Companion Documents
 
-- `PRD.md` (v1.0) — Full 4-block LASSO vision (long-term architecture target)
-- `design-rationale.md` — Detailed reasoning behind every architectural decision
-- `arch-ref.md` — Research bibliography and literature analysis
-- `polar-quant-comp.md` — PolarQuant compression mechanics deep-dive
-- `prev-idea.md` — Earlier architecture candidates (eliminated; see design-rationale.md)
+- `../lasso-v0-original/PRD.md` (v1.0) — Full 4-block LASSO vision (long-term architecture target)
+- `../lasso-v0-original/design-rationale.md` — Detailed reasoning behind every architectural decision
+- `arch-ref.md` — Research bibliography and literature analysis (not in repo)
+- `polar-quant-comp.md` — PolarQuant compression mechanics deep-dive (not in repo)
+- `prev-idea.md` — Earlier architecture candidates (eliminated; see ../lasso-v0-original/design-rationale.md)
+
+**Note (2026-04-26 reorg):** This document was moved from the repo root into `PRDs/lasso-v1-prudent/`. Relative references above are updated. The current ACTIVE chip target is `../lambda-v2/PRD.md` (TSMC 16nm); LASSO PRDs are archived for inheritance reference (KCE block + research narrative carry forward).
 
 ---
 

@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lambda v3 — All-SRAM Tiny-LLM Accelerator (Longhorn Silicon)</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 24px;
+    background: #fafaf7;
+    color: #1a1a1a;
+    line-height: 1.55;
+  }
+  h1, h2, h3 {
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  h1 { font-size: 30px; border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; }
+  h1 .codename { color: #bf5700; font-weight: 700; }
+  h2 { font-size: 22px; margin-top: 44px; }
+  h3 { font-size: 16px; margin-top: 28px; color: #374151; }
+  .tagline { color: #6b7280; font-style: italic; font-size: 14px; margin-top: -4px; }
+  .panel {
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 24px;
+    margin: 20px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .sidebyside { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  svg { display: block; margin: 0 auto; }
+  .legend {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 12px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 16px;
+  }
+  .swatch { width: 14px; height: 14px; border: 1px solid #333; border-radius: 2px; }
+  .mono { font-family: "SF Mono", "Menlo", monospace; font-size: 13px; }
+  .callout {
+    background: #fef3c7;
+    border-left: 3px solid #f59e0b;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .accent {
+    background: #dbeafe;
+    border-left: 3px solid #2563eb;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .headline {
+    background: #ecfccb;
+    border-left: 3px solid #16a34a;
+    padding: 12px 16px;
+    margin: 14px 0;
+    font-size: 14px;
+  }
+  .hero {
+    background: linear-gradient(180deg, #1a1a1a 0%, #2a2a2a 100%);
+    color: #fef9e7;
+    padding: 30px;
+    border-radius: 10px;
+    margin-bottom: 28px;
+  }
+  .hero h1 { color: #fef9e7; border-bottom-color: #16a34a; }
+  .hero h1 .codename { color: #4ade80; }
+  .hero .tagline { color: #fde68a; font-size: 16px; }
+  .hero .meta {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 13px;
+    color: #d1d5db;
+    margin-top: 16px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  th, td {
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f3f4f6; }
+  td.num { text-align: right; font-family: "SF Mono", "Menlo", monospace; }
+  td.center { text-align: center; }
+  code { background: #f3f4f6; padding: 2px 5px; border-radius: 3px; font-size: 13px; }
+  .die-block-label {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 600;
+    fill: #1a1a1a;
+  }
+  .die-block-sub {
+    font-family: "SF Mono", "Menlo", monospace;
+    fill: #4b5563;
+    font-size: 9px;
+  }
+  footer {
+    text-align: center;
+    color: #9ca3af;
+    font-size: 12px;
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+  }
+  .verdict-good { color: #16a34a; font-weight: 600; }
+  .verdict-borderline { color: #ea580c; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+<h1>Lambda <span class="codename">v3</span> — All-SRAM Tiny-LLM Accelerator</h1>
+<div class="tagline">No off-chip memory. No PHY. No mixed-signal IP. The entire model lives on-die.</div>
+<div class="meta">
+  Process: TSMC N16FFC &nbsp;·&nbsp; Die: 2.0 × 2.0 mm = 4 mm² &nbsp;·&nbsp; <strong style="color: #4ade80;">Off-chip memory: NONE</strong>
+  <br>Target workload: 2-10M-parameter transformers (TinyStories-class, distilled BERTs, voice-intent classifiers)
+  <br>Power envelope: 0.25 W always-on / 0.5 W interactive / 1.5 W peak
+  <br>Shuttle: IMEC / Europractice mini@sic 2.0 (primary) — Muse Semiconductor (US fallback)
+  <br>Companions: <code>Lambda_v3_4mm2.yaml</code> &nbsp;·&nbsp; <code>Lambda_v2_4mm2.yaml</code> (3-5B alternative) &nbsp;·&nbsp; <code>Lambda_v1_4mm2.yaml</code> (coprocessor alternative)
+</div>
+</div>
+
+<p style="font-size: 15px; color: #555;">
+  Drawn at <strong>250 pixels = 1 mm</strong>. Die is 2.0 × 2.0 mm = 4.0 mm² with a 100 µm I/O ring.
+  v3's defining feature is the <strong>absence</strong> of an LPDDR PHY — that 1.2 mm² of die that v2
+  spends on talking to off-chip DRAM is, in v3, repurposed for on-die SRAM. The entire model lives in
+  the chip.
+</p>
+
+<div class="headline">
+  <strong>The architectural bet:</strong> at 4 mm² with no PHY, we can fit ~2.5 MB of SRAM. At TurboQuant
+  3-bit weights, that's <strong>up to 6.7M parameters</strong> entirely on-die. At W2 with rotation, ~10M.
+  This is small for a "real LLM" — but it's exactly the sweet spot for <strong>always-on edge AI</strong>:
+  wake-word detection, voice-intent classification, TinyStories-class generative writing, distilled
+  classifiers. The chip runs in a 0.25 W envelope (sub-watt), enabling fanless / battery / coin-cell
+  deployment that no LPDDR-equipped chip can match.
+</div>
+
+<div class="accent">
+  <strong>How v3 differs from v1 and v2:</strong>
+  <ul style="margin: 8px 0 0 20px;">
+    <li><strong>v1</strong> = KV/attention coprocessor; pairs with a host CPU running the model. No LPDDR. Needs software stack to demo.</li>
+    <li><strong>v2</strong> = standalone with LPDDR5X x16 PHY. Runs 3-5B models. PHY is 30% of die area.</li>
+    <li><strong>v3 (this chip)</strong> = standalone with NO off-chip memory. Runs 2-10M models. PHY-less; everything on-die.</li>
+  </ul>
+  All three are 4 mm². Same shuttle cost. Same TSMC N16FFC process. Different architectural philosophies.
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 1: MAIN DIE FLOORPLAN -->
+<!-- ============================================================== -->
+<h2>1. Die floorplan — Lambda v3, 4 mm² (2 × 2 mm)</h2>
+<div class="panel">
+
+<svg viewBox="0 0 620 620" width="780" height="780" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+      <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#f0f0e8" stroke-width="0.5"/>
+    </pattern>
+    <pattern id="sramCells" patternUnits="userSpaceOnUse" width="14" height="14">
+      <rect width="14" height="14" fill="#bfdbfe"/>
+      <rect x="2" y="2" width="3" height="3" fill="#1d4ed8" opacity="0.5"/>
+      <rect x="9" y="2" width="3" height="3" fill="#1d4ed8" opacity="0.5"/>
+      <rect x="2" y="9" width="3" height="3" fill="#1d4ed8" opacity="0.5"/>
+      <rect x="9" y="9" width="3" height="3" fill="#1d4ed8" opacity="0.5"/>
+    </pattern>
+    <pattern id="sramCellsGreen" patternUnits="userSpaceOnUse" width="10" height="10">
+      <rect width="10" height="10" fill="#bbf7d0"/>
+      <rect x="1" y="1" width="2" height="2" fill="#15803d" opacity="0.4"/>
+      <rect x="6" y="1" width="2" height="2" fill="#15803d" opacity="0.4"/>
+      <rect x="1" y="6" width="2" height="2" fill="#15803d" opacity="0.4"/>
+      <rect x="6" y="6" width="2" height="2" fill="#15803d" opacity="0.4"/>
+    </pattern>
+    <pattern id="ringPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+      <rect width="10" height="10" fill="#1a1a1a"/>
+      <rect x="2" y="2" width="6" height="6" fill="#fcd34d"/>
+    </pattern>
+    <pattern id="sysolicPE" patternUnits="userSpaceOnUse" width="9" height="9">
+      <rect width="9" height="9" fill="#fee2e2"/>
+      <rect x="0.5" y="0.5" width="8" height="8" fill="none" stroke="#dc2626" stroke-width="0.4"/>
+    </pattern>
+  </defs>
+
+  <rect width="620" height="620" fill="url(#grid)"/>
+
+  <!-- Header annotation -->
+  <text x="310" y="20" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#16a34a" font-weight="700">ON-DIE — everything Lambda v3 needs is here. NO off-chip memory.</text>
+
+  <!-- Die outline: 500x500 px = 2x2 mm at 250 px/mm. Origin (60, 60). -->
+  <rect x="60" y="60" width="500" height="500" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+
+  <!-- I/O ring: 25 px wide -->
+  <rect x="60" y="60" width="500" height="25" fill="url(#ringPattern)"/>
+  <rect x="60" y="535" width="500" height="25" fill="url(#ringPattern)"/>
+  <rect x="60" y="85" width="25" height="450" fill="url(#ringPattern)"/>
+  <rect x="535" y="85" width="25" height="450" fill="url(#ringPattern)"/>
+
+  <text x="310" y="78" text-anchor="middle" font-family="-apple-system" font-size="10" fill="#fef9e7" font-weight="600">I/O ring + pads + ESD (0.76 mm²) — only USB-C 2.0 + JTAG signals exit</text>
+
+  <!-- ============ CORE AREA: 450x450 px = 1.8 x 1.8 mm at (85, 85) ============ -->
+
+  <!-- WEIGHT BANK — the headline block. 2.0 MB, ~1.6 mm² -->
+  <!-- 450 × 222 px = 99,900 px² = 1.60 mm² -->
+  <!-- Position: (85, 85) to (535, 297) -->
+  <rect x="85" y="85" width="450" height="222" fill="url(#sramCellsGreen)" stroke="#15803d" stroke-width="2.5"/>
+  <text x="310" y="125" text-anchor="middle" class="die-block-label" font-size="22" fill="#15803d" font-weight="700">★ weight_bank ★</text>
+  <text x="310" y="155" text-anchor="middle" class="die-block-label" font-size="16">2.0 MB on-die SRAM</text>
+  <text x="310" y="178" text-anchor="middle" class="die-block-sub" font-size="12">THE ENTIRE MODEL LIVES HERE</text>
+  <text x="310" y="205" text-anchor="middle" class="die-block-sub" font-size="11">At TurboQuant W3 (0.375 bytes/param): up to 5.3M parameters</text>
+  <text x="310" y="220" text-anchor="middle" class="die-block-sub" font-size="11">At W2 with rotation (0.25 bytes/param): up to 8M parameters</text>
+  <text x="310" y="235" text-anchor="middle" class="die-block-sub" font-size="11">Written ONCE at boot from host (~30 ms over USB-C 2.0); read every cycle</text>
+  <text x="310" y="265" text-anchor="middle" class="die-block-sub" font-size="11">Internal bandwidth: ~256 GB/s at 1 GHz (no off-chip wall)</text>
+  <text x="310" y="285" text-anchor="middle" class="die-block-sub" font-size="11" font-style="italic">1.60 mm² of pure SRAM cells — 40% of the die</text>
+
+  <!-- ROW 2: KV scratchpad + activation buffer + codebook ROM (y=315 to y=400) -->
+
+  <!-- kv_scratchpad: 0.27 mm² → 200×80 = 16,000 px² → ~0.256 mm² -->
+  <rect x="85" y="315" width="200" height="85" fill="url(#sramCells)" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="185" y="345" text-anchor="middle" class="die-block-label" font-size="13">kv_scratchpad</text>
+  <text x="185" y="362" text-anchor="middle" class="die-block-sub">0.3 MB · 1-port</text>
+  <text x="185" y="376" text-anchor="middle" class="die-block-sub">~670 single-layer tokens (TinyStories-8M layout)</text>
+  <text x="185" y="392" text-anchor="middle" class="die-block-sub">0.27 mm²</text>
+
+  <!-- activation_buffer: 0.13 mm² → 100×80 -->
+  <rect x="295" y="315" width="120" height="85" fill="#dbeafe" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="355" y="345" text-anchor="middle" class="die-block-label" font-size="12">activation</text>
+  <text x="355" y="360" text-anchor="middle" class="die-block-label" font-size="12">buffer</text>
+  <text x="355" y="378" text-anchor="middle" class="die-block-sub">0.15 MB · 2-port</text>
+  <text x="355" y="392" text-anchor="middle" class="die-block-sub">0.13 mm²</text>
+
+  <!-- codebook ROM: 0.025 mm² → 60×40 -->
+  <rect x="425" y="320" width="110" height="35" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="480" y="335" text-anchor="middle" class="die-block-sub" font-size="10" font-weight="600">codebook ROM</text>
+  <text x="480" y="348" text-anchor="middle" class="die-block-sub" font-size="9">32 KB · 0.025 mm²</text>
+
+  <!-- empty space for clock distribution -->
+  <rect x="425" y="365" width="110" height="35" fill="#f9fafb" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="480" y="380" text-anchor="middle" class="die-block-sub" font-size="9">clock + power +</text>
+  <text x="480" y="392" text-anchor="middle" class="die-block-sub" font-size="9">routing (distributed)</text>
+
+  <!-- ROW 3: Compute fabric + HIF (y=410 to y=535) -->
+
+  <!-- MatE 4×4: 0.04 mm² → 60×42 -->
+  <rect x="85" y="415" width="65" height="50" fill="url(#sysolicPE)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="117" y="435" text-anchor="middle" class="die-block-label" fill="#dc2626" font-size="12">MatE</text>
+  <text x="117" y="448" text-anchor="middle" class="die-block-sub" font-size="9">4×4 PEs</text>
+  <text x="117" y="459" text-anchor="middle" class="die-block-sub" font-size="9">0.04 mm² · 0.032 TOPS</text>
+
+  <!-- VecU 4-lane: 0.07 mm² → 80×55 -->
+  <rect x="160" y="415" width="85" height="50" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="202" y="435" text-anchor="middle" class="die-block-label" font-size="13">VecU</text>
+  <text x="202" y="450" text-anchor="middle" class="die-block-sub" font-size="9">4-lane SIMD</text>
+  <text x="202" y="461" text-anchor="middle" class="die-block-sub" font-size="9">0.07 mm²</text>
+
+  <!-- KCE: 0.08 mm² → 80×60 -->
+  <rect x="255" y="415" width="85" height="50" fill="#bbf7d0" stroke="#15803d" stroke-width="1.5"/>
+  <text x="297" y="430" text-anchor="middle" class="die-block-label" font-size="12">KCE</text>
+  <text x="297" y="443" text-anchor="middle" class="die-block-sub" font-size="9">TurboQuant</text>
+  <text x="297" y="454" text-anchor="middle" class="die-block-sub" font-size="9">16-pt Hadamard</text>
+  <text x="297" y="464" text-anchor="middle" class="die-block-sub" font-size="9">0.08 mm²</text>
+
+  <!-- MSC: 0.08 mm² → 80×50 -->
+  <rect x="85" y="475" width="105" height="55" fill="#cbd5e1" stroke="#475569" stroke-width="1.5"/>
+  <text x="137" y="495" text-anchor="middle" class="die-block-label" font-size="13">MSC (mini)</text>
+  <text x="137" y="510" text-anchor="middle" class="die-block-sub" font-size="9">SRAM xbar · block table</text>
+  <text x="137" y="522" text-anchor="middle" class="die-block-sub" font-size="9">NO LPDDR · 0.08 mm²</text>
+
+  <!-- LSU: 0.08 mm² → 80×50 -->
+  <rect x="200" y="475" width="105" height="55" fill="#e5e7eb" stroke="#374151" stroke-width="1.5"/>
+  <text x="252" y="495" text-anchor="middle" class="die-block-label" font-size="13">LSU (tiny)</text>
+  <text x="252" y="510" text-anchor="middle" class="die-block-sub" font-size="9">in-order RISC · 32-inst</text>
+  <text x="252" y="522" text-anchor="middle" class="die-block-sub" font-size="9">2K µcode · 0.08 mm²</text>
+
+  <!-- HIF: 0.30 mm² → 175×120 -->
+  <rect x="350" y="415" width="185" height="120" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="442" y="450" text-anchor="middle" class="die-block-label" font-size="14">HIF</text>
+  <text x="442" y="475" text-anchor="middle" class="die-block-sub">USB-C 2.0 (480 Mbps)</text>
+  <text x="442" y="492" text-anchor="middle" class="die-block-sub">JTAG + scan chain</text>
+  <text x="442" y="510" text-anchor="middle" class="die-block-sub">boots model in ~30 ms</text>
+  <text x="442" y="525" text-anchor="middle" class="die-block-sub">0.30 mm²</text>
+
+  <!-- gap area for clock/power distribution between compute and bottom edge -->
+  <rect x="315" y="475" width="30" height="55" fill="#f9fafb" stroke="#9ca3af" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- "NO PHY HERE" callout where v2's PHY would have been -->
+  <!-- v2 had PHY at y=368 to y=535. In v3 that area is mostly weight_bank + KV + compute -->
+  <!-- Add a callout text at the bottom -->
+
+  <!-- die size annotations -->
+  <line x1="60" y1="585" x2="560" y2="585" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="60" y1="580" x2="60" y2="590" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="560" y1="580" x2="560" y2="590" stroke="#6b7280" stroke-width="0.5"/>
+  <text x="310" y="600" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b7280">2.0 mm</text>
+
+  <line x1="585" y1="60" x2="585" y2="560" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="580" y1="60" x2="590" y2="60" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="580" y1="560" x2="590" y2="560" stroke="#6b7280" stroke-width="0.5"/>
+  <text x="600" y="315" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b7280" transform="rotate(-90 600 315)">2.0 mm</text>
+
+</svg>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="swatch" style="background: url(#sramCellsGreen), #bbf7d0;"></div>
+  <div><strong>weight_bank (2.0 MB)</strong> — the headline. Where v2 has a 1.2 mm² LPDDR PHY, v3 has 1.6 mm² of weight SRAM. The entire model lives here.</div>
+  <div class="mono">1.60 mm²</div>
+
+  <div class="swatch" style="background: url(#sramCells), #bfdbfe;"></div>
+  <div><strong>kv_scratchpad (0.3 MB)</strong> — compressed KV staging via TurboQuant; ~670 single-layer tokens for TinyStories-8M layout</div>
+  <div class="mono">0.27 mm²</div>
+
+  <div class="swatch" style="background: #dbeafe;"></div>
+  <div><strong>activation_buffer (0.15 MB)</strong> — 2-port; FlashAttention working set + per-token QKV scratch</div>
+  <div class="mono">0.13 mm²</div>
+
+  <div class="swatch" style="background: #fef3c7;"></div>
+  <div><strong>codebook ROM (32 KB)</strong> — TurboQuant centroids + RoPE freq table + transcendental LUTs</div>
+  <div class="mono">0.025 mm²</div>
+
+  <div class="swatch" style="background: url(#sysolicPE), #fee2e2;"></div>
+  <div><strong>MatE-mini</strong> — 4×4 INT8×INT4 systolic, 16 PEs, 0.032 TOPS at 1 GHz</div>
+  <div class="mono">0.04 mm²</div>
+
+  <div class="swatch" style="background: #fed7aa;"></div>
+  <div><strong>VecU-mini</strong> — 4-lane SIMD (half of v2's), 16-bit FP/BF</div>
+  <div class="mono">0.07 mm²</div>
+
+  <div class="swatch" style="background: #bbf7d0;"></div>
+  <div><strong>KCE</strong> — TurboQuant 16-pt Hadamard + Lloyd-Max codebook (same block as v2)</div>
+  <div class="mono">0.08 mm²</div>
+
+  <div class="swatch" style="background: #cbd5e1;"></div>
+  <div><strong>MSC-mini</strong> — SRAM crossbar + 64-entry block table. No LPDDR controller (no LPDDR exists).</div>
+  <div class="mono">0.08 mm²</div>
+
+  <div class="swatch" style="background: #e5e7eb;"></div>
+  <div><strong>LSU-tiny</strong> — in-order RISC, 32-inst ISA, 2K microcode</div>
+  <div class="mono">0.08 mm²</div>
+
+  <div class="swatch" style="background: #e9d5ff;"></div>
+  <div><strong>HIF</strong> — USB-C 2.0 endpoint + JTAG + scan chain</div>
+  <div class="mono">0.30 mm²</div>
+
+  <div class="swatch" style="background: url(#ringPattern);"></div>
+  <div><strong>I/O ring + pads + ESD</strong> — 100 µm wide perimeter; only USB-C 2.0 + JTAG signals exit the die</div>
+  <div class="mono">0.76 mm²</div>
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 2: AREA ACCOUNTING -->
+<!-- ============================================================== -->
+<h2>2. Area accounting</h2>
+<div class="panel">
+<table>
+<thead>
+<tr><th>Component</th><th>Area (mm²)</th><th>% of die</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr style="background: #ecfccb; font-weight: 600;"><td>weight_bank (2.0 MB)</td><td class="num">1.60</td><td class="num">40.0%</td><td>★ THE WHOLE MODEL ★ — replaces v2's PHY</td></tr>
+<tr><td>kv_scratchpad (0.3 MB)</td><td class="num">0.27</td><td class="num">6.8%</td><td>compressed KV via TurboQuant</td></tr>
+<tr><td>activation_buffer (0.15 MB)</td><td class="num">0.13</td><td class="num">3.3%</td><td>2-port; FA working set</td></tr>
+<tr><td>codebook_const_rom (32 KB)</td><td class="num">0.025</td><td class="num">0.6%</td><td>centroids + RoPE + LUTs</td></tr>
+<tr><td><strong>SRAM total (2.5 MB)</strong></td><td class="num"><strong>2.03</strong></td><td class="num"><strong>50.7%</strong></td><td>v3's defining choice — half the die is memory</td></tr>
+<tr><td>MatE-mini (4×4 PEs)</td><td class="num">0.04</td><td class="num">1.0%</td><td>0.032 TOPS at 1 GHz</td></tr>
+<tr><td>VecU-mini (4-lane)</td><td class="num">0.07</td><td class="num">1.8%</td><td>half v2's lane count</td></tr>
+<tr><td>KCE (16-pt Hadamard)</td><td class="num">0.08</td><td class="num">2.0%</td><td>same as v2 — TurboQuant carries forward</td></tr>
+<tr><td>MSC-mini</td><td class="num">0.08</td><td class="num">2.0%</td><td>NO LPDDR controller — just SRAM xbar</td></tr>
+<tr><td>LSU-tiny</td><td class="num">0.08</td><td class="num">2.0%</td><td>2K microcode</td></tr>
+<tr><td>HIF (USB-C 2.0)</td><td class="num">0.30</td><td class="num">7.5%</td><td>same as v2</td></tr>
+<tr><td><strong>Compute + control + host (6 blocks)</strong></td><td class="num"><strong>0.65</strong></td><td class="num"><strong>16.3%</strong></td><td>tiny because the workload is tiny</td></tr>
+<tr style="background: #f3f4f6;"><td><strong>LPDDR PHY (does not exist)</strong></td><td class="num"><strong>0.00</strong></td><td class="num"><strong>0.0%</strong></td><td>★ headline ★ — v2 spends 1.20 mm² here; v3 spends 0</td></tr>
+<tr><td>Clock tree + power grid</td><td class="num">0.30</td><td class="num">7.5%</td><td>simpler than v2 (no PHY clock domain to bridge)</td></tr>
+<tr><td>Routing overhead buffer</td><td class="num">0.10</td><td class="num">2.5%</td><td></td></tr>
+<tr><td>I/O ring + pads + ESD</td><td class="num">0.76</td><td class="num">19.0%</td><td>100 µm × perimeter</td></tr>
+<tr style="background: #fef3c7; font-weight: 600;"><td>TOTAL</td><td class="num">4.01</td><td class="num">~100%</td><td>essentially at budget; first shrink path saves 0.05 mm²</td></tr>
+</tbody>
+</table>
+
+<div class="callout" style="margin-top: 16px;">
+  <strong>The structural inversion vs v2:</strong> v2 spends 65% of die on infrastructure (PHY + I/O ring +
+  clock + host) and only 35% on compute + memory. v3 spends 31% on infrastructure and 67% on compute +
+  memory. <strong>Same die size, totally different chip.</strong>
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 3: WORKLOAD COVERAGE -->
+<!-- ============================================================== -->
+<h2>3. What models actually run on v3</h2>
+<div class="panel">
+
+<p>Compute-bound regime. tok/s = MatE_GOPS × util / (params × 2 ops/param). MatE 4×4 = 32 GOPS peak,
+~19 GOPS at 60% util. SRAM bandwidth is essentially infinite (~256 GB/s on-die) — bandwidth never bottlenecks.</p>
+
+<table>
+<thead>
+<tr><th>Model</th><th>Params</th><th>Quant</th><th>Weight size</th><th>Fits in 2.0 MB?</th><th>tok/s @ 1 GHz</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>TinyStories-1M</td><td class="num">1 M</td><td>W3</td><td class="num">375 KB</td><td class="center"><span class="verdict-good">YES</span></td><td class="num">9,600</td><td><span class="verdict-good">overkill</span></td></tr>
+<tr><td>TinyStories-3M</td><td class="num">3 M</td><td>W3</td><td class="num">1.13 MB</td><td class="center"><span class="verdict-good">YES</span></td><td class="num">3,200</td><td><span class="verdict-good">overkill</span></td></tr>
+<tr style="background: #ecfccb;"><td><strong>TinyStories-8M</strong> ★ primary demo</td><td class="num">8 M</td><td>W2</td><td class="num">2.0 MB</td><td class="center"><span class="verdict-good">YES (tight)</span></td><td class="num"><strong>1,200</strong></td><td><span class="verdict-good">comfortable</span></td></tr>
+<tr><td>TinyStories-8M</td><td class="num">8 M</td><td>W3</td><td class="num">3.0 MB</td><td class="center"><span class="verdict-borderline">no — overflows</span></td><td>—</td><td>need W2 quant</td></tr>
+<tr><td>DistilBERT-mini classifier</td><td class="num">~4 M</td><td>W3</td><td class="num">1.5 MB</td><td class="center"><span class="verdict-good">YES</span></td><td class="num">2,400</td><td><span class="verdict-good">classifier overkill</span></td></tr>
+<tr><td>Voice-intent (~4 M)</td><td class="num">~4 M</td><td>W3</td><td class="num">1.5 MB</td><td class="center"><span class="verdict-good">YES</span></td><td class="num">2,400 @ 1 GHz / 120 @ 50 MHz</td><td><span class="verdict-good">★ ideal use case</span></td></tr>
+<tr><td>10M (capacity ceiling)</td><td class="num">10 M</td><td>W2</td><td class="num">~2.5 MB</td><td class="center"><span class="verdict-borderline">tight; overflow risk</span></td><td class="num">~960</td><td>at the edge</td></tr>
+<tr><td>TinyStories-28M</td><td class="num">28 M</td><td>W2</td><td class="num">7 MB</td><td class="center"><span class="verdict-borderline">no — too big</span></td><td>—</td><td>doesn't fit; use v2 for this class</td></tr>
+</tbody>
+</table>
+
+<div class="accent" style="margin-top: 16px;">
+  <strong>Largest reasonable model:</strong> ~8M params with W2-rotation quantization (TinyStories-8M class).
+  At W3 (TurboQuant-style) the ceiling drops to ~5M. At W4 (standard INT4) the ceiling drops further to
+  ~4M. The right model class for v3 is <strong>specialized 4-8M-parameter networks</strong>: voice intent,
+  distilled classifiers, narrow-domain assistants, TinyStories-class generators.
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 4: POWER + COST -->
+<!-- ============================================================== -->
+<div class="sidebyside">
+
+<div class="panel">
+<h2 style="margin-top: 0;">4. Power budget</h2>
+<table>
+<thead><tr><th>Mode</th><th>Clock</th><th>Power</th><th>Use case</th></tr></thead>
+<tbody>
+<tr><td>Always-on</td><td class="num">50 MHz</td><td class="num">~0.25 W</td><td>wake-word + 50 tok/s</td></tr>
+<tr><td>Interactive</td><td class="num">200 MHz</td><td class="num">~0.50 W</td><td>voice intent + 200 tok/s</td></tr>
+<tr><td>Peak</td><td class="num">1 GHz</td><td class="num">~1.50 W</td><td>1000+ tok/s for 8M model</td></tr>
+<tr><td>Deep idle</td><td class="num">gated</td><td class="num">~0.50 W</td><td>leakage only (16nm 0.8V)</td></tr>
+</tbody>
+</table>
+<p style="font-size: 13px; color: #555; margin-top: 12px;">
+  <strong>Battery feasibility:</strong> AAA battery (3.75 Wh) at 0.25 W average runs ~15 hours. Coin-cell at
+  ~0.05 W deep-idle (clock-gated) runs <strong>months</strong>. v3 enables a deployment regime no
+  LPDDR-equipped chip can match.
+</p>
+</div>
+
+<div class="panel">
+<h2 style="margin-top: 0;">5. Cost</h2>
+<table>
+<tbody>
+<tr><td>Shuttle (IMEC mini@sic 2.0)</td><td class="num">$60-100K</td></tr>
+<tr><td>Shuttle (Muse Semi US fallback)</td><td class="num">~$75K</td></tr>
+<tr style="background: #ecfccb; font-weight: 600;"><td>LPDDR PHY license</td><td class="num">$0 (none needed)</td></tr>
+<tr><td>USB 2.0 controller IP</td><td class="num">$0-30K</td></tr>
+<tr style="font-weight: 600; background: #fef3c7;"><td>TOTAL</td><td class="num">$60-130K</td></tr>
+<tr><td colspan="2" style="color: #6b7280; font-size: 12px;">vs v2's $140-260K — v3 is <strong>~50% the cost</strong> because no LPDDR PHY licensing</td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 5: COMPARISON TO v1 / v2 -->
+<!-- ============================================================== -->
+<h2>6. Lambda v1 vs v2 vs v3</h2>
+<div class="panel">
+
+<table>
+<thead>
+<tr><th>Property</th><th>v1 (conservative)</th><th>v2 (ambitious)</th><th><strong>v3 (this chip)</strong></th></tr>
+</thead>
+<tbody>
+<tr><td>Role</td><td>KV/attention coprocessor</td><td>Standalone LPDDR-backed accelerator</td><td><strong>Standalone all-SRAM accelerator</strong></td></tr>
+<tr><td>Off-chip DRAM</td><td>none (host owns DRAM)</td><td>1× LPDDR5X x16 (~12 GB/s)</td><td><strong>NONE</strong></td></tr>
+<tr><td>LPDDR PHY area</td><td class="num">0 mm²</td><td class="num">1.20 mm² (30% of die)</td><td class="num"><strong>0 mm²</strong></td></tr>
+<tr><td>On-die SRAM</td><td>1.5 MB</td><td>0.8 MB</td><td><strong>2.5 MB</strong></td></tr>
+<tr><td>MatE compute</td><td>none</td><td>8×8 (64 PEs, 0.13 TOPS)</td><td>4×4 (16 PEs, 0.032 TOPS)</td></tr>
+<tr><td><strong>Largest model</strong></td><td>n/a (host runs model)</td><td><strong>3-5B class</strong></td><td><strong>2-10M class</strong></td></tr>
+<tr><td>Demo target</td><td>"speeds up llama.cpp 4-8×"</td><td>"runs Llama-3.2-3B at 8 tok/s"</td><td>"runs TinyStories-8M at 1200 tok/s, &lt;1 W"</td></tr>
+<tr><td>Power</td><td>~3 W</td><td>~2.4 W typical</td><td><strong>~0.25-1.5 W</strong></td></tr>
+<tr><td>Verification load</td><td>~140 tests, ~22 PM</td><td>~180 tests, ~28 PM</td><td><strong>~80 tests, ~12-15 PM</strong></td></tr>
+<tr><td>LPDDR PHY integration risk</td><td>none</td><td>HIGH (vendor IP at 16nm)</td><td><strong>none</strong></td></tr>
+<tr><td>Software stack to demo</td><td>required (~3-6 PM)</td><td>not required</td><td><strong>not required</strong></td></tr>
+<tr><td>Total cost</td><td>~$110-200K</td><td>~$140-260K</td><td><strong>~$60-130K</strong></td></tr>
+<tr><td>Tape-out timing</td><td>2027-12 estimated</td><td>2028-01 estimated</td><td><strong>2027-09 estimated (3-4 mo earlier)</strong></td></tr>
+<tr><td>Research first</td><td>"first silicon TurboQuant + compressed-domain attn"</td><td>"first open-source standalone 3-5B accel at 16nm"</td><td><strong>"first open-source standalone tiny-LLM ASIC at &lt;1 W"</strong></td></tr>
+</tbody>
+</table>
+
+<div class="headline" style="margin-top: 16px;">
+  <strong>The case for v3:</strong> lowest verification load, lowest cost, fastest to silicon, no mixed-signal
+  IP integration, sub-watt power envelope, no software stack required for demo. The trade is model class —
+  v3 only runs networks 100-1000× smaller than v2.
+  <br><br>
+  <strong>When v3 is right:</strong> sponsor or paper interest is in always-on edge AI / IoT / wearables /
+  battery-powered LLM, OR the team needs the lowest-risk fastest-to-silicon Lambda variant for credibility
+  before attempting v2. <strong>When v3 is wrong:</strong> demo story requires "real LLM" capability;
+  customer wedge needs LPDDR-class memory; sponsors want H100-comparable workloads.
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 6: NEXT STEPS -->
+<!-- ============================================================== -->
+<h2>7. Next concrete steps</h2>
+<div class="panel">
+
+<ol style="font-size: 14px;">
+  <li><strong>Decide v1 vs v2 vs v3.</strong> Owner: architecture lead + faculty advisor. Deadline: 2026-06.
+      Three architectures, same 4 mm² die budget, same shuttle path — pick one based on risk tolerance,
+      sponsor interest, and team capacity.</li>
+  <li><strong>IMEC / Europractice mini@sic 2.0 quote</strong> — same as v1/v2; no v3-specific vendor work
+      needed (no LPDDR PHY).</li>
+  <li><strong>If v3: pick demo model class.</strong> TinyStories-8M (generative) vs custom voice-intent-4M
+      vs DistilBERT-mini classifier. Each implies a different RTL test plan.</li>
+  <li><strong>Python golden model for chosen tiny model</strong> — evaluate W3 / W2 / W4 quantization
+      quality. v3's model class is small enough to run on a laptop CPU; quality eval is fast.</li>
+  <li><strong>SRAM compiler quote</strong> from TSMC — at 1.0 MB/mm² (conservative) v3 fits 2.0 MB; at
+      1.25 MB/mm² (mid) it fits 2.5 MB. Density is a 25% swing in model class.</li>
+  <li><strong>Tool-ramp test chip</strong> — same as v1/v2; trivial inverter ring oscillator at N16FFC
+      through IMEC mini@sic. Q3 2026.</li>
+</ol>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 7: TIMELINE -->
+<!-- ============================================================== -->
+<h2>8. Timeline (faster than v2 due to lower verification load)</h2>
+<div class="panel">
+<table>
+<thead><tr><th>Date</th><th>Milestone</th></tr></thead>
+<tbody>
+<tr><td>2026-04 (now)</td><td>v0.1 architecture spec — this document</td></tr>
+<tr><td>2026-05</td><td>IMEC + Muse shuttle quotes; SRAM compiler quote from TSMC</td></tr>
+<tr><td>2026-06</td><td>v1 vs v2 vs v3 decision</td></tr>
+<tr><td>2026-07</td><td>Demo model picked; Python golden model started</td></tr>
+<tr><td>2026-09</td><td>Tool-ramp test chip taped out at IMEC</td></tr>
+<tr><td>2026-10</td><td>Python golden model running end-to-end on chosen tiny model</td></tr>
+<tr><td>2026-11</td><td>MatE + KCE RTL complete (smaller blocks → faster than v2)</td></tr>
+<tr><td>2027-01</td><td>VecU + MSC + LSU + HIF RTL complete</td></tr>
+<tr><td>2027-03</td><td>Full-chip integration</td></tr>
+<tr><td>2027-06</td><td>UVM signoff</td></tr>
+<tr><td>2027-09</td><td>Physical design signoff (DRC/LVS/STA clean)</td></tr>
+<tr><td>2027-10</td><td><strong>GDSII submission to IMEC mini@sic 2.0 (3 months earlier than v2)</strong></td></tr>
+<tr><td>2028-01</td><td>Silicon return</td></tr>
+<tr><td>2028-03</td><td>Bring-up demo: TinyStories-8M generative writing standalone at &lt;1 W</td></tr>
+<tr><td>2028-06</td><td>Paper submission (DAC / MICRO / HotChips student session)</td></tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+  Longhorn Silicon · UT Austin · Generated 2026-04-27 · Lambda v3 spec for the all-SRAM tiny-LLM use case
+  <br>
+  See <code>archs/lambda/Lambda_v3_4mm2.yaml</code> for machine-readable spec, <code>Lambda_v2_4mm2.yaml</code> for the LPDDR-backed alternative, <code>../../STATUS.md</code> for v1 vs v2 vs v3 decision rationale.
+</footer>
+</body>
+</html>

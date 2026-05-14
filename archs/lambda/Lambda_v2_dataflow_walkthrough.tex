@@ -1,0 +1,631 @@
+\documentclass[11pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{textcomp}
+\usepackage[protrusion=true,expansion=false]{microtype}
+\usepackage{lmodern}
+
+\hypersetup{
+  colorlinks=false,
+  pdfborder={0 0 0},
+  pdftitle={Lambda v2 Dataflow Walkthrough},
+  pdfauthor={Chaithu Talasila and Alan Schwartz}
+}
+
+\definecolor{codebg}{gray}{0.96}
+\definecolor{codeframe}{gray}{0.80}
+
+\lstdefinestyle{ttsmall}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  framesep=4pt,
+  xleftmargin=8pt,
+  xrightmargin=8pt,
+  breaklines=true,
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+}
+\lstset{style=ttsmall}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Lambda v2 Dataflow Walkthrough}
+\fancyhead[R]{\small\texttt{lambda-v2-dataflow-0.3}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\titleformat{\section}{\normalfont\large\bfseries}{\thesection.}{0.6em}{}
+\titleformat{\subsection}{\normalfont\normalsize\bfseries}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{18pt}{8pt}
+\titlespacing*{\subsection}{0pt}{12pt}{4pt}
+
+\setlength{\parskip}{4pt}
+\setlength{\parindent}{0pt}
+
+\begin{document}
+
+% ===== TITLE PAGE =====
+\thispagestyle{empty}
+
+\begin{center}
+\vspace*{2cm}
+{\Huge\bfseries Lambda v2 \par}
+\vspace{0.3em}
+{\Large\bfseries Microarchitecture Dataflow Walkthrough \par}
+\vspace{1em}
+{\scshape Longhorn Silicon LLM Inference Accelerator \par}
+\vspace{0.4em}
+{4\,mm\textsuperscript{2} Standalone Transformer Accelerator --- TSMC N16FFC \par}
+\vspace{2.5em}
+
+\noindent\rule{0.6\textwidth}{0.4pt}
+
+\vspace{0.8em}
+\begin{tabular}{rl}
+\textbf{Version:} & \texttt{lambda-v2-dataflow-0.3} (architecture draft) \\
+\textbf{Date:} & 2026-04-27 \\
+\textbf{Status:} & Pre-tape-out reference; companion to \texttt{Lambda\_v2\_4mm2.yaml} \\
+\textbf{Authors:} & Chaithu Talasila and Alan Schwartz, The University of Texas at Austin \\
+\textbf{Reference:} & \texttt{LonghornSilicon/architecture} \\
+\end{tabular}
+\vspace{0.8em}
+
+\noindent\rule{0.6\textwidth}{0.4pt}
+\end{center}
+
+\vspace{4em}
+
+\noindent\textbf{Scope.} This document is a unit-by-unit walkthrough of the eight functional
+blocks on the Lambda v2 die, traced in the order data flows during a single decode token. Each
+block is introduced concretely as it appears on the live execution path of Llama-3.2-3B
+generating token \#42. Numbers are validated against
+\texttt{scripts/v2\_design\_space/lambda\_v2\_audit.py}; companion documents are the
+machine-readable spec \texttt{Lambda\_v2\_4mm2.yaml}, the visual floorplan
+\texttt{Lambda\_v2\_floorplan.html}, and the v1-vs-v2 decision record \texttt{STATUS.md}.
+
+\vfill
+
+\newpage
+
+% ===== TOC =====
+\tableofcontents
+\newpage
+
+% ===== EXECUTION CONTEXT =====
+\section{Execution Context}
+
+The user has been chatting for several turns; the KV cache is partially populated with
+prior-turn context. The chip is about to generate token \#42. Model: Llama-3.2-3B
+(3{,}072-dim hidden state, 28 transformer layers, 8 KV heads of dimension 128). Sections that
+follow describe one discrete stage of hardware activity each, in execution order. Where
+multiple blocks operate concurrently, the ordering reflects the logical dependency graph
+rather than strict serialization.
+
+\subsection{Block Inventory}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}l l r l@{}}
+\toprule
+\textbf{Block} & \textbf{Full Name} & \textbf{Area (mm\textsuperscript{2})} & \textbf{Primary Role} \\
+\midrule
+HIF  & Host Interface              & 0.30  & USB-C 2.0 endpoint; boot DMA, doorbells, JTAG \\
+LSU  & Layer Sequencer Unit        & 0.10  & In-order RISC; 4\,KB microcode; orchestration \\
+MSC  & Memory Subsystem Controller & 0.18  & LPDDR ctrl + 4-port SRAM xbar + 128-entry TLB \\
+PHY  & LPDDR5X $\times$16 PHY      & 1.20  & Mixed-signal IP; 17/12 GB/s peak/sustained \\
+MatE & Matrix Engine               & 0.10  & 8$\times$8 INT8$\times$INT4 systolic; 0.13 TOPS \\
+VecU & Vector Unit                 & 0.144 & 8-lane FP16/BF16 SIMD; transcendentals \\
+KCE  & KV Compression Engine       & 0.08  & TurboQuant: Hadamard + Lloyd-Max codebook \\
+SRAM & On-chip SRAM (4 banks)      & 0.71  & 0.8 MB: KV scratchpad + act buf + weight FIFO + ROM \\
+\bottomrule
+\end{tabular}
+\caption{Lambda v2 functional blocks. Areas verified by \texttt{lambda\_v2\_audit.py}.}
+\end{table}
+
+% ===== STAGE 0 =====
+\section{Stage 0 --- Boot and Weight DMA (HIF)}
+
+When Lambda is plugged into a USB-C port, the \textbf{HIF (Host Interface)} is the first
+block to wake up. HIF is a USB-C 2.0 endpoint running at 480\,Mbps, occupying $\sim$0.30\,mm\textsuperscript{2}
+at the die perimeter. At power-on it (1) enumerates as a USB device, (2) exposes a CSR
+window for driver register access, and (3) provides a JTAG and scan-chain debug port.
+
+The host driver performs two operations over HIF. First, it writes $\sim$3{,}000 instructions of
+pre-compiled microcode into the LSU's instruction RAM --- the static schedule for running
+Llama-3.2-3B. Second, it initiates a 1.5\,GB DMA transfer of W4-quantized weights from host
+DRAM into the off-chip LPDDR5X package. At 60\,MB/s sustained over USB-C 2.0, this transfer
+requires $\sim$25 seconds, but happens only once per power-on cycle. Weights persist in
+LPDDR5X until the device is unplugged.
+
+Once armed, the chip waits for prompts via HIF's 16-deep doorbell queue. When the user
+submits a prompt, the host driver writes a doorbell entry; HIF asserts an interrupt; the LSU
+wakes and begins decode.
+
+% ===== STAGE 1 =====
+\section{Stage 1 --- Layer Schedule Dispatch (LSU)}
+
+The \textbf{LSU (Layer Sequencer Unit)} is the chip's control plane: a 3-stage in-order RISC
+pipeline (fetch $\to$ decode $\to$ dispatch) with 16 general-purpose registers and a 4\,KB
+microcode RAM containing the entire pre-compiled execution schedule. Its minimalism is
+intentional --- transformer decode is structurally identical across all 28 layers, so a
+static, deterministic program suffices. There is no branch predictor, no out-of-order
+execution, no cache hierarchy, no virtual memory.
+
+The first instruction issued for token \#42 is shown below.
+
+\begin{lstlisting}
+LOAD_WEIGHTS  layer=0, slice=qkv_proj             ; DMA descriptor -> MSC queue
+ISSUE_MAT_E   qkv_proj, in=act_buf, out=qkv_scratch ; stalls on weights
+ISSUE_VEC_U   rope, q, k                          ; queued: runs after MatE
+ISSUE_KCE_COMP k -> kv_scratchpad                 ; queued: runs after VecU
+\end{lstlisting}
+
+\texttt{LOAD\_WEIGHTS} is not a CPU-style load --- it writes a DMA descriptor into one of
+MSC's request queues and returns immediately. \texttt{ISSUE\_MAT\_E} hands off to the Matrix
+Engine, which stalls internally awaiting the incoming weight stream. The LSU continues
+speculatively, issuing subsequent instructions that queue behind the in-flight memory
+operation.
+
+The absence of runtime control flow is not a limitation --- it is the architectural claim. A
+pre-compiled schedule with zero branches eliminates an entire class of verification
+complexity. The LSU is the conductor; from this point forward, all real computation occurs in
+the functional units.
+
+% ===== STAGE 2 =====
+\section{Stage 2 --- Address Translation and DRAM Issue (MSC)}
+
+The \textbf{MSC (Memory Subsystem Controller)} receives the LSU's DMA descriptor and acts as
+the chip's memory traffic cop, binding together the SRAM crossbar, the LPDDR5X controller,
+the block-table TLB, and the DMA engine into a single arbitrated fabric.
+
+\subsection{Block-Table TLB}
+
+MSC first consults its 128-entry associative block-table TLB, which maps logical addresses of
+the form \texttt{(session\_id, layer\_id, block\_id)} to physical SRAM bank offsets or DRAM
+row/column addresses. For layer-0 QKV weights, the mapping is static and pre-populated by the
+host driver at boot --- a single-cycle TLB hit to a known DRAM address baked into the
+compiled schedule.
+
+\subsection{DRAM Command Sequencing}
+
+With the physical address resolved, MSC issues a DRAM read via the LPDDR5X controller. The
+controller serializes the request as a compliant LPDDR5X command sequence, honoring all
+timing parameters:
+
+\begin{lstlisting}
+ACT  (bank_id, row_addr)  -> wait t_RCD  ~= 14 ns
+READ (col_addr)            -> wait t_CCD  ~=  5 ns
+READ (col_addr + stride)   -> wait t_CCD  ~=  5 ns
+  ...                          (burst continues)
+Data arrives at MSC read buffer ~30 ns after first READ.
+\end{lstlisting}
+
+The controller uses an open-page policy: rows activated for one access are held open for
+subsequent column reads from the same row, avoiding redundant ACT commands. Bank-conflict
+avoidance logic tracks which banks are open across concurrent requests. The 4-port SRAM
+crossbar remains idle during this initial fetch --- all compute units are stalled pending
+first-weight arrival.
+
+% ===== STAGE 3 =====
+\section{Stage 3 --- Mixed-Signal Bus Driving (LPDDR5X PHY)}
+
+The \textbf{LPDDR5X $\times$16 PHY} is the only mixed-signal block on the die --- licensed
+vendor IP from Synopsys DesignWare or Cadence Denali. At $\sim$1.20\,mm\textsuperscript{2} it is the largest
+single block and the primary area risk (R-Lv2-03). It sits at the die edge and exposes 16
+data pads (DQ0--DQ15), 2 differential strobe pads (DQS/DQS\#), differential clock pads
+(CK/CK\#), and a command bus (CA0--CA6, CKE, CS).
+
+When MSC issues an ACT command, the PHY's digital command path serializes it to the correct
+pin sequence and drives it across impedance-matched PCB traces to the off-chip LPDDR5X
+package. After $t_{RCD}$ ($\sim$14\,ns), the row is open. On the READ command, the PHY's data
+receive path becomes active: its read-leveling logic uses the DQS strobes returning from the
+DRAM to time-align the 8{,}533\,Mbps DQ bitstreams into the chip's 1\,GHz synchronous clock
+domain via a continuous timing-recovery loop that compensates for temperature and voltage
+drift.
+
+\textbf{Performance bottleneck.} 8{,}533\,Mbps $\times$ 16 lanes $/$ 8 bits/byte =
+17\,GB/s peak. After bank-conflict overhead and DRAM refresh, sustained throughput is
+$\sim$12\,GB/s. Every gate of compute on the chip is fed through this single memory channel.
+Bandwidth --- not arithmetic capacity --- is the end-to-end performance constraint at every
+operating point.
+
+\textbf{Risk item R-Lv2-03.} The PHY footprint is quoted at 1.20\,mm\textsuperscript{2} with a
+$\pm$0.30\,mm\textsuperscript{2} real range (NDA-gated). At 1.0\,mm\textsuperscript{2} (best case): SRAM budget grows to
+1.0\,MB with margin. At 1.5\,mm\textsuperscript{2} (worst case): total die exceeds 4\,mm\textsuperscript{2} --- requires
+downgrading to LPDDR4x $\times$16 (losing the 4--5B model class) or growing the die to
+4.5\,mm\textsuperscript{2} ($\sim$12\% shuttle cost increase). Written quote required before floorplan freeze.
+
+% ===== STAGE 4 =====
+\section{Stage 4 --- Weight Staging and SRAM Banks}
+
+MSC writes the fetched weights into the \texttt{weight\_stream\_buffer} --- a 50\,KB
+single-port SRAM macro at the perimeter of MatE. This bank is deliberately undersized: at
+12\,GB/s with $\sim$100\,ns first-byte latency, the minimum buffer depth needed to hide DRAM
+latency is 1.2\,KB. At 50\,KB, the buffer provides 40$\times$ that minimum, enabling
+double-buffering with headroom to warm-cache hot weight slices (e.g., the LM head, which is
+accessed on every token).
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}l r l r p{6.5cm}@{}}
+\toprule
+\textbf{Bank} & \textbf{Cap.} & \textbf{Ports} & \textbf{Area (mm\textsuperscript{2})} & \textbf{Role} \\
+\midrule
+\texttt{weight\_stream\_buffer} & 50 KB & 1-port    & 0.05 & Weight FIFO; 40$\times$ DRAM-latency-hiding minimum \\
+\texttt{activation\_buffer}     & 0.3 MB & 2-port   & 0.26 & Layer input/output; MatE reads while VecU writes \\
+\texttt{kv\_scratchpad}         & 0.4 MB & 1-port   & 0.35 & Compressed K and V for live context \\
+\texttt{codebook\_const\_rom}   & 64 KB & 1-port RO & 0.05 & Lloyd-Max centroids; RoPE table; exp/rsqrt LUTs \\
+\midrule
+\textit{Total}                  & 0.8 MB & --- & 0.71 & --- \\
+\bottomrule
+\end{tabular}
+\caption{On-chip SRAM bank summary.}
+\end{table}
+
+The KV scratchpad holds 50\% of total SRAM capacity. This is an explicit architectural
+decision: long-context decode performance is KV-bandwidth-bound, and the weight buffer needs
+only enough depth to hide DRAM latency --- not to match the KV working set. This asymmetry is
+the primary differentiator from classical weight-centric accelerators.
+
+% ===== STAGE 5 =====
+\section{Stage 5 --- QKV Projection (MatE)}
+
+The \textbf{MatE (Matrix Engine)} is an 8$\times$8 array of Processing Elements (PEs), each
+containing one INT8$\times$INT4 multiplier, one INT16 accumulator, and the latches required
+for weight-stationary dataflow. The array occupies 0.10\,mm\textsuperscript{2} of die --- deliberately compact,
+because on a bandwidth-bound chip, compute area buys diminishing throughput.
+
+\begin{lstlisting}
+       a0   a1   a2  ...  a7      <- activations stream right (INT8)
+        |    |    |        |
+W00 -> [PE]-[PE]-[PE]- ... -[PE]
+        |    |    |        |
+W10 -> [PE]-[PE]-[PE]- ... -[PE]    Each PE: acc += weight * activation
+        |    |    |        |       Weight pinned for entire tile.
+       ...  ...  ...      ...
+        |    |    |        |
+W70 -> [PE]-[PE]-[PE]- ... -[PE]
+        |    |    |        |
+       o0   o1   o2  ...  o7     <- INT16 partial sums drain from bottom
+\end{lstlisting}
+
+For the QKV projection of Llama-3.2-3B (3{,}072-dim hidden $\to$ 4{,}096-dim QKV combined),
+the schedule tiles the 3{,}072$\times$4{,}096 GEMM into 8$\times$8 chunks and streams them
+through the array. On each tile: 64 INT4 weight values latch into the 64 PEs (\emph{one per
+PE} --- this is weight-stationary). Then activations stream from the left edge in rows of 8
+INT8 values per cycle, staggered by one cycle per row. Every PE multiplies its pinned weight
+by its arriving activation, accumulates the result into its INT16 register, and passes the
+activation rightward. Partial sums drain from the bottom edge.
+
+\textbf{Throughput.} 64 PEs $\times$ 2 ops/cycle $\times$ 1\,GHz = 128 GOPS peak. The
+3{,}072-dim QKV projection on a single token requires $\sim$25M MAC operations, completing in
+$\sim$0.2\,ms. Compute headroom over the bandwidth-bound floor is 1.6$\times$ constant ---
+MatE idles waiting for the next weight batch at every operating point. Bandwidth, not
+arithmetic capacity, governs end-to-end throughput.
+
+Output: \texttt{qkv\_scratch} --- three 3{,}072-element vectors (Q, K, V) written to
+\texttt{activation\_buffer}.
+
+% ===== STAGE 6 =====
+\section{Stage 6 --- Rotary Positional Embedding (VecU)}
+
+LSU dispatches \texttt{ISSUE\_VEC\_U rope, q, k}. The \textbf{VecU (Vector Unit)} is the
+chip's programmable SIMD engine: 8 lanes operating on FP16 or BF16 scalars, sharing a 1\,KB
+microcode RAM and 4\,KB of transcendental lookup tables (exp, rsqrt, sigmoid --- 64 entries
+each with linear interpolation logic). Every non-GEMM operation on the chip is implemented as
+a microcoded loop in VecU.
+
+RoPE encodes token position into the query and key vectors by rotating consecutive element
+pairs by a frequency-dependent angle. For a 64-dimensional head, the head is partitioned into
+32 pairs $(x, y)$, and each pair undergoes the rotation:
+
+\begin{equation*}
+(x, y) \;\to\; (x\cos\theta_k - y\sin\theta_k,\;\; x\sin\theta_k + y\cos\theta_k)
+\end{equation*}
+
+Angles $\theta_k$ are read from the RoPE frequency table in \texttt{codebook\_const\_rom}.
+VecU's microcode sequence for RoPE is $\sim$12 $\mu$ops: load pair $\to$ load cos/sin from
+ROM $\to$ 4 multiplies + 2 adds $\to$ store. Eight lanes process 8 pairs in parallel,
+completing the 32 pairs per head in 4 microcode iterations. Both Q and K are rotated, for a
+total of $\sim$30 $\mu$ops per token's RoPE application.
+
+VecU's programmability eliminates four separate fixed-function blocks (RoPE, softmax,
+RMSNorm, SiLU) in favor of one verifiable SIMD engine. The microcode footprint --- 1\,KB ---
+is negligible. The verification surface reduction is substantial. This was a deliberate
+area/complexity trade-off in the v2 architecture.
+
+% ===== STAGE 7 =====
+\section{Stage 7 --- KV Compression via TurboQuant (KCE)}
+
+LSU fires \texttt{ISSUE\_KCE\_COMP k -> kv\_scratchpad}. The \textbf{KCE (KV Compression
+Engine)} is Lambda v2's primary IP contribution --- the silicon implementation of TurboQuant.
+At 0.08\,mm\textsuperscript{2}, it achieves 3.0$\times$ KV compression with no multiplication hardware whatsoever.
+
+K is a 1{,}024-element FP16 vector (8 KV heads $\times$ 128 dim) for this token in this
+layer. KCE processes it in 16-element chunks. The pipeline for each chunk:
+
+\begin{lstlisting}
+[16 x FP16 input elements]
+              |
+              v
+16-pt Walsh-Hadamard Transform
+  4 butterfly stages x 8 add/sub pairs = 32 add/sub
+  Spreads outlier energy uniformly across coordinates
+              |
+              v
+Nearest-Centroid Classifier
+  7 comparators x 16 lanes = 112 comparators
+  Selects nearest of 8 codebook entries (3-bit index)
+              |
+              v
+Bit-Pack: 16 x 3-bit + 16-bit magnitude header = 64 bits
+  FP16 256 bits -> 64 bits, ~3.0x effective compression
+              |
+              v
+[Write 8 bytes -> kv_scratchpad]
+\end{lstlisting}
+
+\subsection{Walsh-Hadamard Transform}
+
+The Hadamard butterfly is a specific arrangement of additions and subtractions that is
+mathematically equivalent to multiplying the input by an orthogonal $\pm 1$ rotation matrix.
+This rotation spreads outlier energy: if the input vector has one dominant coordinate (a
+common pathology in transformer KV caches), the butterfly redistributes that energy roughly
+uniformly across all 16 coordinates, producing a distribution that is approximately
+Beta-distributed --- the target regime for the Lloyd-Max codebook.
+
+\subsection{Lloyd-Max Codebook}
+
+The codebook holds 8 centroids (64 bytes stored in \texttt{codebook\_const\_rom}), computed
+offline to be optimal for the Beta distribution. Each post-Hadamard coordinate independently
+selects the nearest centroid using a bank of 7 comparators. The resulting 3-bit index,
+combined with a 16-bit group-wise magnitude header, achieves $\sim$3 bits per element
+effective compression versus FP16's 16 bits per element --- a 3.0$\times$ storage and
+bandwidth reduction.
+
+Every operation in the KCE pipeline is an add, subtract, comparator evaluation, or ROM
+lookup. There are no multipliers. This is why the entire block fits in 0.08\,mm\textsuperscript{2} and consumes
+only $\sim$50\,mW at full throughput. The compressed K, and then V, are written to
+\texttt{kv\_scratchpad} alongside all prior-token KV vectors for this layer.
+
+% ===== STAGE 8 =====
+\section{Stage 8 --- Compressed-Domain Q$\cdot$K$^\top$ Scoring (MatE)}
+
+LSU dispatches \texttt{ISSUE\_MAT\_E qk\_dot, q, k\_compressed -> scores}. MatE switches from
+weight-stationary to output-stationary mode by asserting a single CSR mode bit, which changes
+which tensor is pinned in the PE array and which streams through.
+
+In output-stationary mode, Q is pinned (8 query heads, one per row) and the compressed past-K
+vectors from \texttt{kv\_scratchpad} stream through column by column. For a context of
+$\sim$3{,}000 accumulated tokens, this streams 3{,}000 compressed-K vectors through the
+array, producing a scores tensor of shape [3{,}000 $\times$ 8 query heads].
+
+\textbf{Compressed-domain dot product.} For a symmetric quantization scheme, the dot product
+$\langle Q, \mathrm{dequant}(K_c) \rangle$ is algebraically equivalent to
+$\mathrm{scale} \cdot \langle Q, K_c \rangle$. The scale is a scalar applied once per row sum
+--- not per multiply. MatE executes the full attention scoring in the compressed domain:
+INT8 Q $\times$ INT3 K multiplications with INT16 partial-sum accumulation. No FP16
+dequantization step is required before scoring, and no intermediate FP16 K matrix is
+materialized.
+
+% ===== STAGE 9 =====
+\section{Stage 9 --- Online FlashAttention-3 Softmax (VecU)}
+
+LSU fires \texttt{ISSUE\_VEC\_U softmax\_online, scores}. This is the most algorithmically
+significant microcode on the chip.
+
+Na\"ive softmax requires materializing the full attention score matrix prior to computing the
+denominator $\exp(s - \max(s)) / \sum \exp(s)$. At 3{,}000 tokens $\times$ 8 heads $\times$ 2
+bytes (FP16), that matrix occupies $\sim$50\,KB --- saturating the activation buffer. The
+FlashAttention-3 online algorithm avoids full materialization by processing scores in tiles
+and maintaining only two running scalars per attention row:
+
+\begin{lstlisting}
+State per query row: (m_i, l_i, O_i)
+    m_i  -- running maximum of all scores seen so far
+    l_i  -- running sum of exp(score - m_i)
+    O_i  -- running weighted value accumulator
+
+On each new tile of scores (s_1, ..., s_T):
+    m_new  = max(m_i, max(s_1...s_T))
+    l_i   *= exp(m_i - m_new)                ; rescale for new max
+    O_i   *= exp(m_i - m_new)                ; rescale accumulator
+    m_i    = m_new
+    l_i   += sum exp(s_j - m_new)
+    O_i   += sum exp(s_j - m_new) * V_tile[j]
+
+After final tile:  output = O_i / l_i        ; one division per row
+\end{lstlisting}
+
+The rescaling factor $\exp(m_{old} - m_{new})$ corrects for having used the wrong maximum in
+prior tiles --- the algebra is exactly equivalent to full softmax. Intermediate storage per
+attention row is only $(m_i, l_i)$: two scalars. No score tensor is ever fully materialized.
+
+VecU's 8 lanes process 8 query-row states in parallel. The microcode loop is $\sim$32 $\mu$ops
+per tile (load tile $\to$ max-reduce $\to$ exp via LUT $\to$ multiply-accumulate $\to$ update
+state). Over 3{,}000-token context with tile size 32, $\sim$100 tiles run per layer, for
+$\sim$3{,}200 $\mu$ops per softmax invocation. The exp lookup is a 64-entry ROM spanning
+$x \in [-16, 0]$ with linear interpolation to 0.05 ULP error.
+
+% ===== STAGE 10 =====
+\section{Stage 10 --- Tiled Softmax$\cdot$V Accumulation (MatE + VecU)}
+
+In the FlashAttention-3 tiled algorithm, the \texttt{softmax\_scores $\cdot$ V} accumulation
+is not a separate GEMM invocation --- it is interleaved with the softmax tile loop within
+each iteration of Stage 9. On every tile:
+
+\begin{enumerate}[leftmargin=2em]
+\item MatE scores Q$\cdot$K$^\top$ for the current tile of past-K vectors from \texttt{kv\_scratchpad}.
+\item VecU updates the running state $(m_i, l_i)$ and rescales $O_i$.
+\item VecU accumulates $O_i \mathrel{+}= \text{softmax\_weight}_j \cdot V_{\text{tile}}[j]$ for each tile position.
+\end{enumerate}
+
+MatE and VecU run concurrently, with VecU consuming the score tiles that MatE produces. The
+LSU's pre-compiled schedule explicitly orchestrates the cycle-by-cycle handoff. When the
+final context tile is consumed, $O_i / l_i$ yields the exact attention output with no
+intermediate score tensor ever resident in SRAM.
+
+After the last attention tile, \texttt{attn\_out} resides in \texttt{activation\_buffer}. The
+LSU then immediately dispatches \texttt{ISSUE\_MAT\_E attn\_out\_proj} --- a 1{,}024 $\times$
+3{,}072 GEMM projecting the multi-head attention output back to the residual stream
+dimension, using the same weight-stationary dataflow as Stage 5.
+
+% ===== STAGE 11 =====
+\section{Stage 11 --- Feed-Forward Network (MatE + VecU)}
+
+Three dispatches in rapid succession constitute the feed-forward sublayer. Collectively they
+represent the dominant compute and bandwidth cost of every transformer layer.
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}c l l r p{5cm}@{}}
+\toprule
+\textbf{\#} & \textbf{Dispatch} & \textbf{Operation} & \textbf{Shape} & \textbf{Notes} \\
+\midrule
+1 & \texttt{ISSUE\_MAT\_E ffn\_up}   & MatE: hidden $\to$ intermediate & $3072 \times 8192$ & $\sim$2.67$\times$ expansion; largest GEMM \\
+2 & \texttt{ISSUE\_VEC\_U silu\_mul} & VecU: SiLU activation gate      & 8192 elements      & SiLU$(x) = x \cdot \sigma(x)$ via LUT \\
+3 & \texttt{ISSUE\_MAT\_E ffn\_down} & MatE: intermediate $\to$ hidden & $8192 \times 3072$ & Weights stream from LPDDR \\
+\bottomrule
+\end{tabular}
+\caption{FFN sublayer dispatch sequence (Llama-3.2-3B).}
+\end{table}
+
+Each MatE dispatch pulls a fresh weight slice from LPDDR5X via the weight\_stream\_buffer at
+full 12\,GB/s throughput. MatE runs at $\sim$50\% utilization on average (weight-bound).
+VecU's SiLU pass processes 8{,}192 elements across 8 lanes in $\sim$50 $\mu$ops, with the
+sigmoid computed via the 64-entry LUT in \texttt{codebook\_const\_rom}. The FFN sublayer
+accounts for roughly 70\% of each layer's compute and 70\% of each layer's LPDDR traffic.
+
+% ===== STAGE 12 =====
+\section{Stage 12 --- RMSNorm and Residual (VecU)}
+
+LSU dispatches \texttt{ISSUE\_VEC\_U rmsnorm\_residual}. VecU reads the current layer's
+residual stream from \texttt{activation\_buffer}, adds the FFN output, computes the RMS over
+the 3{,}072 elements, looks up $1/\sqrt{\text{RMS}}$ from the rsqrt LUT, multiplies through
+element-wise, and writes the result back. The microcoded sequence is $\sim$40 $\mu$ops; the
+reciprocal-square-root lookup is the hot transcendental on this path.
+
+\texttt{activation\_buffer} now holds the normalized, residual-summed output of layer 0 ---
+the input vector for layer 1. The LSU's program counter increments to the layer-1 entry
+point. Llama-3.2-3B has 28 layers; each costs $\sim$5\,ms of LPDDR-bound time on this chip.
+Per-token latency: $28 \times \sim$5\,ms $\approx$ 134\,ms/token $\to$ $\sim$7.4 tok/s.
+Execution loops back to Stage 1 with \texttt{layer = 1}.
+
+% ===== STAGE 13 =====
+\section{Stage 13 --- LM Head, Sampling, and Emission}
+
+After layer 27, LSU fires \texttt{ISSUE\_MAT\_E lm\_head} --- a 3{,}072 $\times$ 128{,}256
+projection from the final hidden state to the full vocabulary logit space. This is MatE's
+largest single GEMM by output dimension, though the input is still a single token vector, so
+the weight-streaming overhead dominates compute. The LM head benefits from warm-cache
+behavior of the weight\_stream\_buffer, which retains frequently-used hot slices across
+tokens.
+
+VecU runs sampling over the 128{,}256-element logit vector ($\sim$30 $\mu$ops): temperature
+scaling, top-$k$ masking, top-$p$ nucleus truncation, and a single softmax + categorical
+draw. The chosen token ID --- a 17-bit integer --- is placed in HIF's transmit buffer.
+
+HIF packetizes the token as a USB-C 2.0 bulk transfer and delivers it to the host driver. The
+runtime (llama.cpp, a custom Python loop, or equivalent) receives the token ID and renders it
+on screen.
+
+The LSU immediately resets its program counter to layer 0, seeds \texttt{activation\_buffer}
+with the new token's embedding, and begins the next decode pass. The token-to-token loop runs
+$\sim$125--135\,ms per token --- 7--8 tok/s sustained.
+
+% ===== APPENDIX A =====
+\section{Complete Chip Dataflow}
+
+\begin{lstlisting}
+HIF (boot) ---> LPDDR (weights at rest)
+                                                  +-- prefetch (concurrent) --+
+LSU -> MSC -> PHY -> LPDDR -> PHY -> MSC -> weight_stream_buffer -> MatE
+    (xlate)         (DRAM read)     (data ret)   (SRAM staging)        |
+                                                                       v
+activation_buffer <-- VecU (RoPE) <-- MatE (QKV proj) --> KCE --> kv_scratchpad
+                                                                       |
+       MatE (output-stationary Q.K^T, compressed) <-- kv_scratchpad <--+
+                              |
+                              v
+       VecU (online FA-3 softmax) --> MatE (softmax.V tiles) --> attn_out
+                                                                       |
+                                                                       v
+       MatE (FFN up) --> VecU (SiLU) --> MatE (FFN down) --> residual
+                                                                       |
+                                                                       v
+       VecU (RMSNorm) --> activation_buffer -- (loop x 28 layers)
+                                                                       |
+                                                                       v
+       MatE (LM head) --> VecU (sample) --> HIF TX --> USB-C --> host
+\end{lstlisting}
+
+Eight blocks. One assembly line. Every cycle, somewhere on the chip, a multiplier is firing,
+a Hadamard butterfly is permuting, or a softmax running state is updating. The entire
+computation is choreographed by the LSU's pre-compiled microcode --- no runtime decisions, no
+branch prediction, no surprises.
+
+% ===== APPENDIX B =====
+\section{Performance Summary}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}l l p{6cm}@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} & \textbf{Notes} \\
+\midrule
+Sustained DRAM bandwidth & 12 GB/s   & LPDDR5X-8533 $\times$16 after overhead \\
+Peak compute (MatE)      & 0.13 TOPS & 128 GOPS INT8$\times$INT4 @ 1 GHz \\
+Decode throughput        & 7--8 tok/s & Llama-3.2-3B 134 ms/tok; Mistral-NeMo-3B 125 ms/tok \\
+Typical decode power     & 2.4 W     & Peak prefill 3.1 W; USB-C 15 W budget \\
+KV compression ratio     & 3.0$\times$ & TurboQuant 3-bit; zero multipliers \\
+Total die area           & 4 mm\textsuperscript{2}   & 2.0 $\times$ 2.0 mm; TSMC N16FFC \\
+NRE cost (shuttle + IP)  & \$140--260K & IMEC mini@sic 2.0; vs $\sim$\$500--700K flagship \\
+\bottomrule
+\end{tabular}
+\caption{Lambda v2 performance and area summary.}
+\end{table}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}l r r r r l@{}}
+\toprule
+\textbf{Model} & \textbf{Params} & \textbf{W4 Size} & \textbf{ms/tok} & \textbf{tok/s} & \textbf{Status} \\
+\midrule
+Llama-3.2-1B          & 1.24 B & 0.62 GB & 51.9  & 19.3 & Comfortable \\
+Gemma-2-2B            & 2.0 B  & 1.00 GB & 83.7  & 11.9 & Comfortable \\
+Mistral-NeMo-3B       & 3.0 B  & 1.50 GB & 125.6 & 8.0  & Primary demo \\
+Llama-3.2-3B          & 3.21 B & 1.61 GB & 134.4 & 7.4  & Interactive \\
+Phi-3.5-mini          & 3.82 B & 1.91 GB & 159.9 & 6.3  & Borderline \\
+5B ceiling            & 5.0 B  & 2.50 GB & 209.3 & 4.8  & At threshold \\
+\bottomrule
+\end{tabular}
+\caption{Model class coverage at Lambda v2 baseline operating point.}
+\end{table}
+
+\vfill
+\noindent\rule{\textwidth}{0.4pt}\\
+\textit{Lambda v2 Microarchitecture Dataflow Walkthrough. Companion to
+\texttt{Lambda\_v2\_4mm2.yaml}, \texttt{Lambda\_v2\_floorplan.html}, and \texttt{STATUS.md}.
+Numbers validated by \texttt{scripts/v2\_design\_space/lambda\_v2\_audit.py}.}
+
+\end{document}

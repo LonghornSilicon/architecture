@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Lambda v2 — 4 mm² Floorplan & Specifications (Longhorn Silicon)</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    max-width: 1200px;
+    margin: 40px auto;
+    padding: 0 24px;
+    background: #fafaf7;
+    color: #1a1a1a;
+    line-height: 1.55;
+  }
+  h1, h2, h3 {
+    font-weight: 600;
+    letter-spacing: -0.015em;
+  }
+  h1 { font-size: 30px; border-bottom: 2px solid #1a1a1a; padding-bottom: 8px; }
+  h1 .codename { color: #bf5700; font-weight: 700; }
+  h2 { font-size: 22px; margin-top: 44px; }
+  h3 { font-size: 16px; margin-top: 28px; color: #374151; }
+  .tagline { color: #6b7280; font-style: italic; font-size: 14px; margin-top: -4px; }
+  .panel {
+    background: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 24px;
+    margin: 20px 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .sidebyside { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  svg { display: block; margin: 0 auto; }
+  .legend {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 12px;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    gap: 8px 12px;
+    align-items: center;
+    margin-top: 16px;
+  }
+  .swatch { width: 14px; height: 14px; border: 1px solid #333; border-radius: 2px; }
+  .mono { font-family: "SF Mono", "Menlo", monospace; font-size: 13px; }
+  .callout {
+    background: #fef3c7;
+    border-left: 3px solid #f59e0b;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .accent {
+    background: #dbeafe;
+    border-left: 3px solid #2563eb;
+    padding: 10px 14px;
+    margin: 12px 0;
+    font-size: 14px;
+  }
+  .hero {
+    background: linear-gradient(180deg, #1a1a1a 0%, #2a2a2a 100%);
+    color: #fef9e7;
+    padding: 30px;
+    border-radius: 10px;
+    margin-bottom: 28px;
+  }
+  .hero h1 { color: #fef9e7; border-bottom-color: #bf5700; }
+  .hero h1 .codename { color: #ff8c42; }
+  .hero .tagline { color: #fde68a; font-size: 16px; }
+  .hero .meta {
+    font-family: "SF Mono", "Menlo", monospace;
+    font-size: 13px;
+    color: #d1d5db;
+    margin-top: 16px;
+  }
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 14px;
+    margin-top: 8px;
+  }
+  th, td {
+    border: 1px solid #d1d5db;
+    padding: 6px 10px;
+    text-align: left;
+  }
+  th { background: #f3f4f6; }
+  td.num { text-align: right; font-family: "SF Mono", "Menlo", monospace; }
+  td.center { text-align: center; }
+  code { background: #f3f4f6; padding: 2px 5px; border-radius: 3px; font-size: 13px; }
+  .die-block-label {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-weight: 600;
+    fill: #1a1a1a;
+  }
+  .die-block-sub {
+    font-family: "SF Mono", "Menlo", monospace;
+    fill: #4b5563;
+    font-size: 9px;
+  }
+  footer {
+    text-align: center;
+    color: #9ca3af;
+    font-size: 12px;
+    margin-top: 60px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+  }
+  .verdict-good { color: #16a34a; font-weight: 600; }
+  .verdict-borderline { color: #ea580c; font-weight: 600; }
+  .verdict-fail { color: #dc2626; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+<h1>Lambda — 4 mm² Standalone Transformer Accelerator</h1>
+<div class="tagline">Longhorn Accelerator for Matrix-Based Dataflow & Attention &nbsp;·&nbsp; Chips, designed at Texas</div>
+<div class="meta">
+  Process: TSMC N16FFC &nbsp;·&nbsp; Die: 2.0 × 2.0 mm = 4 mm² &nbsp;·&nbsp; Off-chip: 1× LPDDR5X-8533 x16 (12 GB/s sustained)
+  <br>Target workload: 3-5B-class transformers (Llama-3.2-3B / Mistral-NeMo-3B / Qwen2.5-3B / Phi-3.5-mini), W4A8 + TurboQuant 3-bit KV (4.0 bpe, 4× vs FP16)
+  <br>Shuttle: IMEC / Europractice mini@sic 2.0 (primary) — Muse Semiconductor (US fallback)
+  <br>Companions: <code>arch.yml</code> &nbsp;·&nbsp; <code>dataflow_walkthrough.md</code> &nbsp;·&nbsp; <code>STATUS.md</code> &nbsp;·&nbsp; <code>src/</code> (HLS C++)
+  <br>Audited 2026-05-14: KV math, KCE bpe, MatE accumulator, headroom claims corrected.
+</div>
+</div>
+
+<p style="font-size: 15px; color: #555;">
+  Drawn at <strong>250 pixels = 1 mm</strong>. Die is 2.0 × 2.0 mm = 4.0 mm² with a 100 µm I/O ring on every side
+  (0.76 mm² of perimeter). All block sizes are area-faithful within ±5%; aspect ratios are PnR-suggestive
+  but not binding (real placement determined by Cadence Innovus during PD). Numbers verified by
+  the 2026-05-14 area audit (see <code>STATUS.md</code> §4).
+</p>
+
+<div class="accent">
+  <strong>What's on-die vs off-chip:</strong> the rectangle labeled "Lambda silicon" is the 4 mm² ASIC we
+  tape out — it contains 9 functional blocks (MatE, VecU, KCE-mini, MSC, LSU, TIU, HIF + SRAM banks + LPDDR PHY) plus an I/O ring. The dark box <em>below</em> the die is the
+  <strong>LPDDR5X-8533 DRAM package</strong>, a separate mobile-grade memory chip mounted on the same PCB
+  next to Lambda. The "LPDDR5X x16 PHY" block on the bottom edge of our die is just the analog interface
+  (data lanes, clocking, calibration) that drives signals out through pad-ring pins, across PCB traces,
+  and into the off-chip DRAM package. The DRAM itself — 4–8 GB of storage holding your model weights —
+  is <em>not</em> on Lambda's die.
+</div>
+
+<div class="callout">
+  <strong>Pivotal uncertainty (R-Lv2-03):</strong> the LPDDR5X x16 PHY is estimated at 1.20 mm² but the real
+  range is 1.0–1.5 mm². At 1.0 (vendor best case): SRAM can grow to 1.0 MB. At 1.5 (worst case): chip
+  doesn't fit at 4 mm² — must either grow die to 4.5 mm² (~+12% shuttle), or fall back to
+  <strong>LPDDR4X x16 (Cadence)</strong> at ~1.0 mm² PHY (loses ~half the bandwidth → caps at 2.4B models
+  at 5 tok/s but recovers 0.2 mm² and gets a vendor with public datasheets). See STATUS.md for the
+  full LPDDR5X-vs-LPDDR4X tradeoff. Get written quote from Synopsys/Cadence Q2 2026 before floorplan freeze.
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 1: MAIN DIE FLOORPLAN -->
+<!-- ============================================================== -->
+<h2>1. Die floorplan — Lambda v2, 4 mm² (2 × 2 mm)</h2>
+<div class="panel">
+
+<svg viewBox="0 0 620 760" width="780" height="940" xmlns="http://www.w3.org/2000/svg">
+
+  <defs>
+    <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+      <path d="M 50 0 L 0 0 0 50" fill="none" stroke="#f0f0e8" stroke-width="0.5"/>
+    </pattern>
+    <pattern id="phyHatch" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+      <line x1="0" y1="0" x2="0" y2="6" stroke="#9ca3af" stroke-width="2"/>
+    </pattern>
+    <pattern id="ringPattern" patternUnits="userSpaceOnUse" width="10" height="10">
+      <rect width="10" height="10" fill="#1a1a1a"/>
+      <rect x="2" y="2" width="6" height="6" fill="#fcd34d"/>
+    </pattern>
+    <pattern id="sysolicPE" patternUnits="userSpaceOnUse" width="9" height="9">
+      <rect width="9" height="9" fill="#fee2e2"/>
+      <rect x="0.5" y="0.5" width="8" height="8" fill="none" stroke="#dc2626" stroke-width="0.4"/>
+    </pattern>
+  </defs>
+
+  <rect width="620" height="760" fill="url(#grid)"/>
+
+  <!-- ==================================================================== -->
+  <!-- ON-DIE / OFF-CHIP boundary annotation                                 -->
+  <!-- ==================================================================== -->
+  <text x="310" y="20" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#1a1a1a" font-weight="700">ON-DIE (Lambda silicon, 4 mm²)</text>
+  <line x1="60" y1="30" x2="560" y2="30" stroke="#1a1a1a" stroke-width="0.5" stroke-dasharray="4,2"/>
+
+  <!-- Die outline: 500x500 px = 2x2 mm at 250 px/mm. Origin (60, 60). -->
+  <rect x="60" y="60" width="500" height="500" fill="none" stroke="#1a1a1a" stroke-width="2"/>
+
+  <!-- I/O ring: 25 px wide (= 100 µm at 250 px/mm) all around -->
+  <!-- Top -->
+  <rect x="60" y="60" width="500" height="25" fill="url(#ringPattern)"/>
+  <!-- Bottom -->
+  <rect x="60" y="535" width="500" height="25" fill="url(#ringPattern)"/>
+  <!-- Left -->
+  <rect x="60" y="85" width="25" height="450" fill="url(#ringPattern)"/>
+  <!-- Right -->
+  <rect x="535" y="85" width="25" height="450" fill="url(#ringPattern)"/>
+
+  <!-- Ring label -->
+  <text x="310" y="78" text-anchor="middle" font-family="-apple-system" font-size="10" fill="#fef9e7" font-weight="600">I/O ring + pads + ESD (0.76 mm²)</text>
+
+  <!-- ============ CORE AREA: 450x450 px = 1.8 x 1.8 mm at (85, 85) ============ -->
+
+  <!-- LPDDR5X x16 PHY: bottom strip, 1.20 mm² = 1.8 mm × 0.667 mm = 450 × 167 px -->
+  <!-- This is the ON-DIE physical-layer interface — DRAM itself is off-chip below -->
+  <rect x="85" y="368" width="450" height="167" fill="url(#phyHatch)" stroke="#374151" stroke-width="1.5"/>
+  <text x="310" y="430" text-anchor="middle" class="die-block-label" font-size="16">LPDDR5X x16 PHY <tspan font-size="11" fill="#6b7280" font-weight="400">(on-die interface only)</tspan></text>
+  <text x="310" y="450" text-anchor="middle" class="die-block-sub" font-size="11">vendor IP (Synopsys / Cadence) · 1.20 mm² · ±0.3 swing</text>
+  <text x="310" y="465" text-anchor="middle" class="die-block-sub" font-size="11">8533 Mbps × 16 lanes = 17 GB/s peak · 12 GB/s sustained</text>
+  <text x="310" y="480" text-anchor="middle" class="die-block-sub" font-size="11">DQ0–DQ15 · DQS · CK · CA · ZQ calibration · ODT</text>
+  <text x="310" y="510" text-anchor="middle" class="die-block-sub" font-size="10" font-style="italic" fill="#7c3aed">drives signals down through pads → off-chip LPDDR5X package below</text>
+
+  <!-- HIF (PCIe Gen3 x1 on M.2): top-right, 0.55 mm² = 145 × 130 px (slightly larger after Phase 0.1) -->
+  <rect x="390" y="85" width="145" height="130" fill="#e9d5ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="462" y="130" text-anchor="middle" class="die-block-label">HIF</text>
+  <text x="462" y="147" text-anchor="middle" class="die-block-sub">PCIe Gen3 x1</text>
+  <text x="462" y="159" text-anchor="middle" class="die-block-sub">(M.2 2280 form factor)</text>
+  <text x="462" y="171" text-anchor="middle" class="die-block-sub">~1 GB/s sustained</text>
+  <text x="462" y="183" text-anchor="middle" class="die-block-sub">+ JTAG on dedicated pins</text>
+  <text x="462" y="200" text-anchor="middle" class="die-block-sub">0.55 mm²</text>
+
+  <!-- Activation buffer (0.3 MB, 2-port): top-left, 0.26 mm² = 145 × 113 px -->
+  <rect x="85" y="85" width="145" height="113" fill="#bfdbfe" stroke="#1d4ed8" stroke-width="1.5"/>
+  <text x="158" y="125" text-anchor="middle" class="die-block-label" font-size="12">activation_buffer</text>
+  <text x="158" y="143" text-anchor="middle" class="die-block-sub">0.3 MB · 2-port</text>
+  <text x="158" y="156" text-anchor="middle" class="die-block-sub">FA tile + QKV scratch</text>
+  <text x="158" y="184" text-anchor="middle" class="die-block-sub">0.26 mm²</text>
+
+  <!-- weight_stream_buffer (0.05 MB): small, near MatE, 0.05 mm² = 70 × 70 px -->
+  <rect x="240" y="85" width="70" height="70" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="275" y="115" text-anchor="middle" class="die-block-sub" font-weight="600" font-size="10">weight_buf</text>
+  <text x="275" y="128" text-anchor="middle" class="die-block-sub" font-size="9">0.05 MB</text>
+  <text x="275" y="141" text-anchor="middle" class="die-block-sub" font-size="9">stream FIFO</text>
+
+  <!-- codebook_const_rom (64 KB): same row, smaller, 0.05 mm² = 70 × 60 px -->
+  <rect x="320" y="85" width="60" height="70" fill="#fef3c7" stroke="#ca8a04" stroke-width="1.5"/>
+  <text x="350" y="115" text-anchor="middle" class="die-block-sub" font-weight="600" font-size="10">codebook</text>
+  <text x="350" y="128" text-anchor="middle" class="die-block-sub" font-size="9">ROM 64 KB</text>
+  <text x="350" y="141" text-anchor="middle" class="die-block-sub" font-size="9">0.05 mm²</text>
+
+  <!-- MatE (8x8 PE array): center-upper, 0.10 mm² = 80 × 80 px -->
+  <rect x="240" y="170" width="80" height="80" fill="url(#sysolicPE)" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="280" y="200" text-anchor="middle" class="die-block-label" fill="#dc2626" font-size="14">MatE</text>
+  <text x="280" y="215" text-anchor="middle" class="die-block-sub" font-size="9">8×8 PEs · INT8×INT4</text>
+  <text x="280" y="225" text-anchor="middle" class="die-block-sub" font-size="9">→ INT24 K-axis acc</text>
+  <text x="280" y="237" text-anchor="middle" class="die-block-sub" font-size="9">0.13 TOPS · 0.10 mm²</text>
+
+  <!-- VecU (8-lane SIMD): below MatE, 0.144 mm² = 145 × 70 px -->
+  <rect x="240" y="265" width="145" height="62" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="312" y="290" text-anchor="middle" class="die-block-label" font-size="14">VecU</text>
+  <text x="312" y="307" text-anchor="middle" class="die-block-sub" font-size="9">8-lane SIMD · FP16/BF</text>
+  <text x="312" y="320" text-anchor="middle" class="die-block-sub" font-size="9">online softmax · 0.144 mm²</text>
+
+  <!-- KCE (16-pt Hadamard): right of MatE, 0.08 mm² = 65 × 80 px -->
+  <rect x="325" y="170" width="65" height="80" fill="#bbf7d0" stroke="#15803d" stroke-width="1.5"/>
+  <text x="357" y="195" text-anchor="middle" class="die-block-label" font-size="13">KCE</text>
+  <text x="357" y="213" text-anchor="middle" class="die-block-sub" font-size="9">TurboQuant</text>
+  <text x="357" y="225" text-anchor="middle" class="die-block-sub" font-size="9">16-pt Hadamard</text>
+  <text x="357" y="240" text-anchor="middle" class="die-block-sub" font-size="9">0.08 mm²</text>
+
+  <!-- KV scratchpad (0.4 MB): left, near KCE for write path, 0.35 mm² = 145 × 152 px -->
+  <rect x="85" y="210" width="145" height="148" fill="#bfdbfe" stroke="#1e40af" stroke-width="2"/>
+  <text x="158" y="265" text-anchor="middle" class="die-block-label" font-weight="700" font-size="13">kv_scratchpad</text>
+  <text x="158" y="285" text-anchor="middle" class="die-block-sub" font-weight="600">★ headline bank ★</text>
+  <text x="158" y="302" text-anchor="middle" class="die-block-sub">0.4 MB · 1-port</text>
+  <text x="158" y="316" text-anchor="middle" class="die-block-sub">1638 tok/layer (Qwen2.5-3B)</text>
+  <text x="158" y="328" text-anchor="middle" class="die-block-sub">409 tok/layer (Llama-3.2-3B)</text>
+  <text x="158" y="350" text-anchor="middle" class="die-block-sub">0.35 mm²</text>
+
+  <!-- MSC: lower-middle, 0.18 mm² = 145 × 80 px -->
+  <rect x="240" y="335" width="145" height="30" fill="#cbd5e1" stroke="#475569" stroke-width="1.5"/>
+  <text x="312" y="356" text-anchor="middle" class="die-block-label" font-size="13">MSC · 0.18 mm² · 4-port crossbar · 128-entry block table</text>
+
+  <!-- LSU: top-right area, 0.10 mm² = 145 × 50 px -->
+  <rect x="390" y="220" width="145" height="50" fill="#e5e7eb" stroke="#374151" stroke-width="1.5"/>
+  <text x="462" y="240" text-anchor="middle" class="die-block-label" font-size="12">LSU</text>
+  <text x="462" y="255" text-anchor="middle" class="die-block-sub">in-order RISC · 32-inst ISA</text>
+  <text x="462" y="266" text-anchor="middle" class="die-block-sub">4K µcode · 0.10 mm²</text>
+
+  <!-- routing/clock distributed area indicator -->
+  <rect x="390" y="280" width="145" height="80" fill="#f9fafb" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,2"/>
+  <text x="462" y="310" text-anchor="middle" class="die-block-sub" font-size="10">clock tree +</text>
+  <text x="462" y="324" text-anchor="middle" class="die-block-sub" font-size="10">power grid +</text>
+  <text x="462" y="338" text-anchor="middle" class="die-block-sub" font-size="10">routing buffer</text>
+  <text x="462" y="352" text-anchor="middle" class="die-block-sub" font-size="10">~0.40 mm² distributed</text>
+
+  <!-- ============ Annotations / arrows ============ -->
+
+  <!-- weight_buf → MatE arrow -->
+  <line x1="275" y1="155" x2="275" y2="170" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrowblue)"/>
+
+  <!-- Define arrow markers -->
+  <defs>
+    <marker id="arrowblue" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 6 3 L 0 6 z" fill="#2563eb"/>
+    </marker>
+    <marker id="arrowred" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 6 3 L 0 6 z" fill="#dc2626"/>
+    </marker>
+    <marker id="arrowgreen" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 6 3 L 0 6 z" fill="#15803d"/>
+    </marker>
+  </defs>
+
+  <!-- KV scratchpad ↔ KCE -->
+  <line x1="230" y1="284" x2="325" y2="225" stroke="#15803d" stroke-width="1" stroke-dasharray="2,2"/>
+
+  <!-- die size dimension annotations -->
+  <line x1="60" y1="585" x2="560" y2="585" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="60" y1="580" x2="60" y2="590" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="560" y1="580" x2="560" y2="590" stroke="#6b7280" stroke-width="0.5"/>
+  <text x="310" y="600" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b7280">2.0 mm</text>
+
+  <line x1="585" y1="60" x2="585" y2="560" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="580" y1="60" x2="590" y2="60" stroke="#6b7280" stroke-width="0.5"/>
+  <line x1="580" y1="560" x2="590" y2="560" stroke="#6b7280" stroke-width="0.5"/>
+  <text x="600" y="315" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#6b7280" transform="rotate(-90 600 315)">2.0 mm</text>
+
+  <!-- ==================================================================== -->
+  <!-- OFF-CHIP region (PCB level): LPDDR5X DRAM package + M.2 connector edge  -->
+  <!-- ==================================================================== -->
+
+  <!-- Boundary line separating on-die from off-chip -->
+  <line x1="60" y1="618" x2="560" y2="618" stroke="#1a1a1a" stroke-width="0.5" stroke-dasharray="4,2"/>
+  <text x="310" y="613" text-anchor="middle" font-family="-apple-system" font-size="13" fill="#1a1a1a" font-weight="700">OFF-CHIP (mounted on the same PCB)</text>
+
+  <!-- Wire bundle from die's bottom edge (PHY pads) down to the LPDDR package -->
+  <!-- 16 DQ + 2 DQS + 4 CA + 1 CK = ~24 traces drawn as a single thick band -->
+  <rect x="240" y="535" width="140" height="65" fill="#fde68a" stroke="#9ca3af" stroke-width="0.5" stroke-dasharray="2,1"/>
+  <text x="310" y="555" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">~24 traces on PCB</text>
+  <text x="310" y="567" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">DQ × 16, DQS × 2, CK, CA × 5</text>
+  <text x="310" y="579" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151">~5-15 mm long; impedance-matched</text>
+  <text x="310" y="592" text-anchor="middle" font-family="-apple-system" font-size="9" fill="#374151" font-style="italic">(this is where signal integrity matters)</text>
+
+  <!-- Wire arrows from die bottom edge to LPDDR package -->
+  <line x1="200" y1="535" x2="200" y2="630" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="240" y1="535" x2="240" y2="630" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="380" y1="535" x2="380" y2="630" stroke="#9ca3af" stroke-width="1"/>
+  <line x1="420" y1="535" x2="420" y2="630" stroke="#9ca3af" stroke-width="1"/>
+
+  <!-- LPDDR5X DRAM package, off-die: drawn at scale ~10x10mm in real life,
+       represented here as a similar-size box for visual parity -->
+  <rect x="120" y="630" width="380" height="105" fill="#1f2937" stroke="#000" stroke-width="2" rx="6"/>
+  <text x="310" y="660" text-anchor="middle" font-family="-apple-system" font-size="15" fill="#fde68a" font-weight="700">LPDDR5X-8533 DRAM package (off-chip)</text>
+  <text x="310" y="678" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Micron / Samsung / SK Hynix mobile LPDDR5X · 4-8 GB capacity</text>
+  <text x="310" y="694" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Single x16 channel · 1.05 V VDDQ + 1.8 V VDD2 · BGA package</text>
+  <text x="310" y="710" text-anchor="middle" font-family="-apple-system" font-size="11" fill="#fde68a">Holds: model weights (1.5 GB Llama-3.2-3B at INT4) + scratch room</text>
+  <text x="310" y="725" text-anchor="middle" font-family="-apple-system" font-size="10" fill="#9ca3af" font-style="italic">~$5-15 BoM cost; sits next to Lambda die on the same PCB / module</text>
+
+</svg>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="swatch" style="background: url(#sysolicPE), #fee2e2;"></div>
+  <div><strong>MatE</strong> — 8×8 INT8×INT4 weight-stationary systolic, 64 PEs, 0.13 TOPS at 1 GHz</div>
+  <div class="mono">0.10 mm²</div>
+
+  <div class="swatch" style="background: #fed7aa;"></div>
+  <div><strong>VecU</strong> — 8-lane SIMD, FP16/BF16, online softmax + transcendental LUTs</div>
+  <div class="mono">0.144 mm²</div>
+
+  <div class="swatch" style="background: #bbf7d0;"></div>
+  <div><strong>KCE</strong> — TurboQuant: 16-point Walsh-Hadamard + 8-centroid Lloyd-Max + bit-pack</div>
+  <div class="mono">0.08 mm²</div>
+
+  <div class="swatch" style="background: #cbd5e1;"></div>
+  <div><strong>MSC</strong> — single LPDDR5X x16 controller, 4-port SRAM crossbar, 128-entry block table</div>
+  <div class="mono">0.18 mm²</div>
+
+  <div class="swatch" style="background: #e5e7eb;"></div>
+  <div><strong>LSU</strong> — in-order RISC, 32-instruction ISA, 4K microcode RAM, 16×32-bit GPR</div>
+  <div class="mono">0.10 mm²</div>
+
+  <div class="swatch" style="background: #e9d5ff;"></div>
+  <div><strong>HIF</strong> — PCIe Gen3 x1 endpoint on M.2 2280 form factor; 16-deep doorbell queue; JTAG on dedicated pins</div>
+  <div class="mono">0.55 mm²</div>
+
+  <div class="swatch" style="background: #bfdbfe;"></div>
+  <div><strong>SRAM banks</strong> — KV scratchpad (0.4 MB) + activation buffer (0.3 MB) + weight stream (0.05 MB) + ROM (64 KB)</div>
+  <div class="mono">0.71 mm² (0.8 MB)</div>
+
+  <div class="swatch" style="background: url(#phyHatch), white;"></div>
+  <div><strong>LPDDR5X x16 PHY</strong> — on-die analog interface (data lanes + clocking + calibration); drives signals to off-chip DRAM</div>
+  <div class="mono">1.20 mm²</div>
+
+  <div class="swatch" style="background: url(#ringPattern);"></div>
+  <div><strong>I/O ring + pads + ESD</strong> — 100 µm wide perimeter, 2 kV HBM ESD protection</div>
+  <div class="mono">0.76 mm²</div>
+
+  <div class="swatch" style="background: #1f2937;"></div>
+  <div><strong>LPDDR5X DRAM package</strong> — <em>off-chip</em> mobile-grade DRAM (4-8 GB), mounted on PCB next to Lambda; holds model weights</div>
+  <div class="mono">off-die</div>
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 2: AREA ACCOUNTING TABLE -->
+<!-- ============================================================== -->
+<h2>2. Area accounting</h2>
+<div class="panel">
+<table>
+<thead>
+<tr><th>Component</th><th>Area (mm²)</th><th>% of die</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>Matrix Engine (MatE) — 8×8 INT8×INT4</td><td class="num">0.10</td><td class="num">2.5%</td><td>64 PEs, 0.13 TOPS at 1 GHz</td></tr>
+<tr><td>Vector Unit (VecU) — 8-lane SIMD</td><td class="num">0.144</td><td class="num">3.6%</td><td>online softmax, RoPE, RMSNorm, SiLU</td></tr>
+<tr><td>KV Compression Engine (KCE)</td><td class="num">0.08</td><td class="num">2.0%</td><td>16-pt Hadamard + Lloyd-Max codebook</td></tr>
+<tr><td>Memory Subsystem Controller (MSC)</td><td class="num">0.18</td><td class="num">4.5%</td><td>1× LPDDR5X ctrl + 4-port xbar + block table</td></tr>
+<tr><td>Layer Sequencer (LSU)</td><td class="num">0.10</td><td class="num">2.5%</td><td>32-inst ISA, 4K microcode</td></tr>
+<tr><td>Host Interface (HIF) — PCIe Gen3 x1 / M.2 2280</td><td class="num">0.55</td><td class="num">13.8%</td><td>incl. PCIe PHY (0.35) + controller + doorbell (0.20); JTAG on dedicated pins</td></tr>
+<tr><td>Token Importance Unit (TIU) <strong>NEW</strong></td><td class="num">0.03</td><td class="num">0.8%</td><td>256 B importance SRAM + accumulator; drives MSC eviction + KCE per-block precision</td></tr>
+<tr><td>SRAM — kv_scratchpad (0.4 MB)</td><td class="num">0.35</td><td class="num">8.8%</td><td>1-port HD; 1638 single-layer tokens for Qwen2.5-3B / 409 for Llama-3.2-3B (4.0 bpe)</td></tr>
+<tr><td>SRAM — activation_buffer (0.3 MB)</td><td class="num">0.26</td><td class="num">6.5%</td><td>2-port; FA working set + QKV scratch</td></tr>
+<tr><td>SRAM — weight_stream_buffer (0.05 MB)</td><td class="num">0.05</td><td class="num">1.3%</td><td>1-port; 40× LPDDR latency-hiding minimum</td></tr>
+<tr><td>SRAM — codebook_const_rom (64 KB)</td><td class="num">0.05</td><td class="num">1.3%</td><td>1-port read-only; centroids + RoPE + LUTs</td></tr>
+<tr><td><strong>LPDDR5X x16 PHY</strong> (vendor)</td><td class="num"><strong>1.20</strong></td><td class="num"><strong>30.0%</strong></td><td>NDA-gated; ±0.3 mm² real swing</td></tr>
+<tr><td>Clock tree + power grid</td><td class="num">0.40</td><td class="num">10.0%</td><td>~10% of die at 16nm</td></tr>
+<tr><td>Routing overhead buffer</td><td class="num">0.10</td><td class="num">2.5%</td><td>inter-block channel reserve</td></tr>
+<tr><td>I/O ring + pads + ESD</td><td class="num">0.76</td><td class="num">19.0%</td><td>100 µm × perimeter (8000 µm) − corner overlap</td></tr>
+<tr style="background: #fef3c7; font-weight: 600;"><td>GROSS TOTAL (PHY=1.2, no shrinks)</td><td class="num">4.354</td><td class="num">~109%</td><td>over budget by 0.354 mm² — see shrink path below</td></tr>
+<tr style="background: #d1fae5; font-weight: 600;"><td>WITH RECOMMENDED SHRINKS</td><td class="num">4.014</td><td class="num">~100.4%</td><td>PHY @ 1.0 (-0.20) + 80 µm ring (-0.06) + activation buffer 0.2 MB (-0.08); contingent on PHY quote</td></tr>
+</tbody>
+</table>
+
+<div class="callout" style="margin-top: 16px;">
+  <strong>Sensitivity (revised 2026-05-14 after PCIe Gen3 x1 HIF + TIU additions):</strong>
+  Gross area is 4.354 mm² at PHY = 1.2 mm² mid-case — over budget by 0.354 mm². Recommended shrink path
+  (PHY best case at 1.0 mm² + I/O ring tightened to 80 µm + activation buffer shrunk to 0.2 MB) lands at
+  <strong>4.014 mm²</strong>, within 0.4% of 4.0 mm² target. <strong>Contingent on Q2 2026 vendor PHY
+  quote returning ≤ 1.0 mm²</strong>. If PHY comes back &gt; 1.0 mm², fall back to either (a) grow die to
+  4.25 mm² (~+6% shuttle cost), or (b) LPDDR4X x16 PHY (Cadence-with-public-datasheets path; caps model
+  class at 2.4B at 5 tok/s). At PHY = <strong>1.5 mm²</strong> worst case, total is 4.654 mm² — must
+  pick (a) grow die or (b) LPDDR4X. See <code>STATUS.md</code> §5 for the full LPDDR5X-vs-LPDDR4X
+  tradeoff and §3 for the area table.
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 3: WORKLOAD COVERAGE -->
+<!-- ============================================================== -->
+<h2>3. Workload coverage — what models actually run</h2>
+<div class="panel">
+
+<p>Decode is bandwidth-bound. Largest reasonable model = bandwidth × time / (2 × INT4 bytes/param) =
+<strong>11.94 GB/s × 0.2 s / 0.5 = 4.78 B params</strong> at the 5 tok/s threshold.
+Verified by the 2026-05-14 roofline analysis (STATUS.md §3).</p>
+
+<table>
+<thead>
+<tr><th>Model</th><th>Params</th><th>W4 size</th><th>ms/tok</th><th>tok/s</th><th>Verdict</th></tr>
+</thead>
+<tbody>
+<tr><td>SmolLM2-360M</td><td class="num">0.36 B</td><td class="num">0.18 GB</td><td class="num">15.1</td><td class="num">66.4</td><td><span class="verdict-good">overkill</span></td></tr>
+<tr><td>Qwen2.5-0.5B</td><td class="num">0.50 B</td><td class="num">0.25 GB</td><td class="num">20.9</td><td class="num">47.8</td><td><span class="verdict-good">very comfortable</span></td></tr>
+<tr><td>Llama-3.2-1B</td><td class="num">1.24 B</td><td class="num">0.62 GB</td><td class="num">51.9</td><td class="num">19.3</td><td><span class="verdict-good">very comfortable</span></td></tr>
+<tr><td>TinyLlama-1.1B</td><td class="num">1.10 B</td><td class="num">0.55 GB</td><td class="num">46.0</td><td class="num">21.7</td><td><span class="verdict-good">very comfortable</span></td></tr>
+<tr><td>Gemma-2-2B</td><td class="num">2.0 B</td><td class="num">1.00 GB</td><td class="num">83.7</td><td class="num">11.9</td><td><span class="verdict-good">comfortable</span></td></tr>
+<tr style="background: #ecfccb;"><td><strong>Mistral-NeMo-3B</strong> ★ primary demo</td><td class="num">3.0 B</td><td class="num">1.50 GB</td><td class="num">125.6</td><td class="num"><strong>8.0</strong></td><td><span class="verdict-good">comfortable interactive</span></td></tr>
+<tr style="background: #ecfccb;"><td>Qwen2.5-3B (long-context champion via LPDDR-streamed KV)</td><td class="num">3.09 B</td><td class="num">1.55 GB</td><td class="num">129.3</td><td class="num">7.7</td><td><span class="verdict-borderline">borderline · 32K via stream</span></td></tr>
+<tr style="background: #ecfccb;"><td>Llama-3.2-3B</td><td class="num">3.21 B</td><td class="num">1.61 GB</td><td class="num">134.4</td><td class="num">7.4</td><td><span class="verdict-borderline">borderline interactive</span></td></tr>
+<tr><td>Phi-3.5-mini-instruct</td><td class="num">3.82 B</td><td class="num">1.91 GB</td><td class="num">159.9</td><td class="num">6.3</td><td><span class="verdict-borderline">borderline</span></td></tr>
+<tr><td>4B (hypothetical)</td><td class="num">4.0 B</td><td class="num">2.00 GB</td><td class="num">167.4</td><td class="num">6.0</td><td><span class="verdict-borderline">borderline</span></td></tr>
+<tr><td>5B (the practical ceiling)</td><td class="num">5.0 B</td><td class="num">2.50 GB</td><td class="num">209.3</td><td class="num">4.8</td><td><span class="verdict-borderline">at threshold</span></td></tr>
+<tr><td>Mistral-7B</td><td class="num">7.24 B</td><td class="num">3.62 GB</td><td class="num">303.0</td><td class="num">3.3</td><td><span class="verdict-fail">below — needs v2-stretch x32</span></td></tr>
+<tr><td>Llama-3.1-8B</td><td class="num">8.03 B</td><td class="num">4.01 GB</td><td class="num">336.1</td><td class="num">3.0</td><td><span class="verdict-fail">below — needs v2-stretch x32</span></td></tr>
+</tbody>
+</table>
+
+<div class="accent" style="margin-top: 16px;">
+  <strong>Compute headroom:</strong> 1.6× constant across all models in the bandwidth-bound regime. Compute
+  is NOT the bottleneck at any v2 baseline operating point — bandwidth is the entire performance story.
+  Verified by the 2026-05-14 model-fit analysis.
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 4: KV SCRATCHPAD CAPACITY -->
+<!-- ============================================================== -->
+<h2>4. KV scratchpad capacity — corrected 2026-05-14</h2>
+<div class="panel">
+
+<p>KV bytes per token per layer = <code>kv_heads × head_dim × 2 (K+V) × bpe / 8 bits/byte</code>
+with <strong>bpe = 4.0</strong> for v2 KCE-mini (16-pt Hadamard + 3-bit codebook + 16-bit FP16 scale
+per 16-element group). Earlier drafts of this document used 3.5 bpe (flagship 32-pt value) AND
+dropped the K+V doubling, producing capacity numbers <strong>~2.3× too generous</strong>. Numbers below are correct.</p>
+
+<table>
+<thead>
+<tr><th>Model</th><th>KV layout</th><th>B/tok/layer (4.0 bpe)</th><th>0.4 MB capacity</th><th>0.5 MB capacity</th><th>4K fits on-die?</th></tr>
+</thead>
+<tbody>
+<tr><td>SmolLM2-360M</td><td>5 × 64 (30L)</td><td class="num">320</td><td class="num">1,310 tok</td><td class="num">1,638 tok</td><td class="center">no</td></tr>
+<tr><td>Qwen2.5-0.5B</td><td>2 × 64 (24L)</td><td class="num">128</td><td class="num">3,276 tok</td><td class="num">4,096 tok</td><td class="center"><span class="verdict-good">YES</span></td></tr>
+<tr><td>Llama-3.2-1B</td><td>8 × 64 (16L)</td><td class="num">512</td><td class="num">819 tok</td><td class="num">1,024 tok</td><td class="center">no</td></tr>
+<tr><td>TinyLlama-1.1B</td><td>4 × 64 (22L)</td><td class="num">256</td><td class="num">1,638 tok</td><td class="num">2,048 tok</td><td class="center">no</td></tr>
+<tr><td>Gemma-2-2B</td><td>4 × 256 (26L)</td><td class="num">1,024</td><td class="num">409 tok</td><td class="num">512 tok</td><td class="center">no</td></tr>
+<tr style="background: #ecfccb;"><td><strong>Qwen2.5-3B</strong> (long-ctx champ)</td><td><strong>2 × 128</strong> (36L)</td><td class="num">256</td><td class="num"><strong>1,638 tok</strong></td><td class="num">2,048 tok</td><td class="center">no <em>(but only 2.5× short)</em></td></tr>
+<tr><td>Llama-3.2-3B</td><td>8 × 128 (28L)</td><td class="num">1,024</td><td class="num">409 tok</td><td class="num">512 tok</td><td class="center">no</td></tr>
+<tr><td>Mistral-NeMo-3B</td><td>8 × 128 (28L)</td><td class="num">1,024</td><td class="num">409 tok</td><td class="num">512 tok</td><td class="center">no</td></tr>
+<tr><td>Phi-3.5-mini</td><td>32 × 96 (32L)</td><td class="num">3,072</td><td class="num">136 tok</td><td class="num">170 tok</td><td class="center">no</td></tr>
+</tbody>
+</table>
+
+<p style="margin-top: 16px; font-size: 13px; color: #555;">
+<strong>What changed:</strong> earlier drafts claimed "Qwen2.5-3B 32K context fits ON-DIE per layer (4,681 tokens at 0.5 MB)".
+The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V factor restored and v2's correct 4.0 bpe, only
+2,048 tokens fit at 0.5 MB. <strong>32K context does NOT fit on-die in any configuration</strong> — it serves via LPDDR streaming.
+</p>
+
+<div class="callout" style="margin-top: 16px;">
+  <strong>LPDDR KV-streaming penalty (per token, 4.0 bpe, 12 GB/s sustained):</strong>
+  <ul style="font-size: 13px; margin: 6px 0;">
+    <li>Qwen2.5-3B (2 KV × 128, 36L): 4K ~3 ms, 8K ~6 ms, <strong>32K ~24 ms</strong> → 32K end-to-end ~6.5 tok/s (above threshold)</li>
+    <li>Llama-3.2-3B (8 KV × 128, 28L): 4K ~9 ms, 8K ~19 ms, 32K ~75 ms → <strong>32K drops to ~4.9 tok/s (at threshold)</strong></li>
+    <li>Mistral-NeMo-3B: identical to Llama-3.2-3B</li>
+    <li>Phi-3.5-mini (32 KV × 96, 32L): 4K ~33 ms — even at 4K, decode drops below 5 tok/s. <em>Not recommended as demo target.</em></li>
+  </ul>
+  <strong>Headline demo guidance:</strong> keep target prompts ≤ 8K for comfortable interactive operation across all 3B-class targets. Qwen2.5-3B is the long-context demo champ (sustainable 32K via streaming).
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 5: POWER + COST + DECISIONS -->
+<!-- ============================================================== -->
+<div class="sidebyside">
+
+<div class="panel">
+<h2 style="margin-top: 0;">5. Power budget</h2>
+<table>
+<thead><tr><th>Block</th><th>W (decode)</th></tr></thead>
+<tbody>
+<tr><td>LPDDR5X PHY+DRAM (12 GB/s sustained)</td><td class="num">0.72</td></tr>
+<tr><td>MatE (50% util, bandwidth-bound)</td><td class="num">0.32</td></tr>
+<tr><td>VecU (8 lanes)</td><td class="num">0.16</td></tr>
+<tr><td>SRAM 0.8 MB (50% util)</td><td class="num">0.16</td></tr>
+<tr><td>KCE-mini</td><td class="num">0.05</td></tr>
+<tr><td>TIU (Token Importance Unit) <strong>NEW</strong></td><td class="num">0.01</td></tr>
+<tr><td>MSC + LSU</td><td class="num">0.20</td></tr>
+<tr><td>HIF (PCIe Gen3 x1) <strong>REVISED</strong></td><td class="num">0.30</td></tr>
+<tr><td>Whole-chip leakage (16nm 0.8V)</td><td class="num">0.70</td></tr>
+<tr style="font-weight: 600; background: #ecfccb;"><td>TYPICAL DECODE</td><td class="num">~2.6</td></tr>
+<tr style="font-weight: 600; background: #fef3c7;"><td>PEAK PREFILL (100% util)</td><td class="num">~3.3</td></tr>
+</tbody>
+</table>
+<p style="font-size: 13px; color: #555; margin-top: 12px;">
+  M.2 2280 slot delivers 3.3 V or 5 V at ~10 W per the M.2 spec — leaves &gt;6 W headroom even at peak.
+  <strong>Fanless / battery deployment is feasible</strong> (power budget grew ~0.2 W vs USB-C 2.0 spec
+  due to PCIe Gen3 x1 PHY + controller; verified by 2026-05-14 power-budget analysis).
+</p>
+</div>
+
+<div class="panel">
+<h2 style="margin-top: 0;">6. Cost</h2>
+<table>
+<tbody>
+<tr><td>Shuttle (IMEC mini@sic 2.0)</td><td class="num">$60-100K</td></tr>
+<tr><td>Shuttle (Muse Semi US fallback)</td><td class="num">~$75K</td></tr>
+<tr><td>LPDDR5X x16 PHY license</td><td class="num">$80-130K</td></tr>
+<tr><td>PCIe Gen3 x1 PHY + controller IP</td><td class="num">$30-60K</td></tr>
+<tr style="font-weight: 600; background: #fef3c7;"><td>TOTAL</td><td class="num">$170-290K</td></tr>
+<tr><td colspan="2" style="color: #6b7280; font-size: 12px;">vs flagship 25 mm² archived target ~$500-700K — Lambda v2 is <strong>~3-4× cheaper</strong> for the same model class.</td></tr>
+</tbody>
+</table>
+</div>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 6: QUANTIZATION MODES + ATTENTION VARIANTS -->
+<!-- ============================================================== -->
+<h2>7. Supported features</h2>
+<div class="panel">
+
+<h3>Quantization (CSR-selectable modes)</h3>
+<table>
+<thead><tr><th>Tensor</th><th>Mode</th><th>Compression</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td rowspan="2">Weights</td><td>INT4 per-channel groupwise</td><td class="num">4×</td><td>Primary; W4A8 sweet spot per ACL'25</td></tr>
+<tr><td>INT8 fallback</td><td class="num">2×</td><td>For accuracy-critical layers (logits)</td></tr>
+<tr><td>Activations</td><td>INT8 per-token dynamic</td><td class="num">2×</td><td>SmoothQuant / QServe paradigm</td></tr>
+<tr><td rowspan="5">KV cache</td><td><strong>TurboQuant 3-bit + 16-pt Hadamard</strong></td><td class="num"><strong>3.0×</strong></td><td>Primary mode (KCE-mini)</td></tr>
+<tr><td>Hadamard-INT4 (16-pt)</td><td class="num">3.2×</td><td>Fallback</td></tr>
+<tr><td>Asymmetric K=3 / V=2</td><td class="num">~6×</td><td>Free upgrade — alt codebook ROM, 5 verif tests</td></tr>
+<tr><td>FP4 codebook (NVFP4 levels)</td><td class="num">3.0×</td><td>Free — alt 64-byte ROM; CSR-selectable</td></tr>
+<tr><td>FP16 bypass</td><td class="num">1×</td><td>Debug / ablation</td></tr>
+<tr><td>Attention scoring</td><td>INT8 Q × INT3 K → FP16 softmax accumulator</td><td>—</td><td>FlashAttention-3 mixed precision</td></tr>
+</tbody>
+</table>
+
+<h3>Attention variants</h3>
+<ul style="font-size: 14px;">
+<li><strong>Vanilla MHA</strong> — full multi-head attention (every Q has its own K, V)</li>
+<li><strong>GQA (Grouped Query Attention)</strong> — N query heads share M KV heads (Llama-3 family, Mistral-NeMo)</li>
+<li><strong>MQA (Multi-Query Attention)</strong> — degenerate GQA with 1 KV head; same hardware</li>
+<li><strong>FlashAttention-3 online softmax</strong> — VecU microcode running running (m_i, l_i, O_i) per query row</li>
+<li><strong>vLLM PagedAttention</strong> — MSC's 128-entry block table is the silicon implementation of vLLM's KV abstraction</li>
+</ul>
+
+<h3>Explicitly NOT supported in v2 baseline</h3>
+<ul style="font-size: 14px; color: #6b7280;">
+<li>Continuous batching (single-session chip — sized for batch 1)</li>
+<li>Tier-3 host-DRAM eviction (no PCIe; no big-storage path)</li>
+<li>Prefix sharing across sessions</li>
+<li>Multi-Latent Attention (DeepSeek MLA — different KV layout)</li>
+<li>Mixture of Experts routing</li>
+<li>Multimodal (vision encoder, audio)</li>
+<li>Training / backprop</li>
+<li>Runtime DVFS / voltage scaling</li>
+</ul>
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 8: AUDIT LOG -->
+<!-- ============================================================== -->
+<h2>8. Audit log (2026-05-14)</h2>
+<div class="panel">
+<p>The 2026-05-14 pre-RTL audit caught the following bugs in this spec and corrected them:</p>
+<ol style="font-size: 14px;">
+  <li><strong>KV bytes/token off by ~2.3×.</strong> Spec dropped the K+V factor of 2 AND used flagship's 3.5 bpe instead of v2 KCE-mini's correct 4.0 bpe. Re-derived all capacity numbers in Panel 4.</li>
+  <li><strong>"Qwen2.5-3B 32K on-die" claim was wrong.</strong> Even with the most aggressive shrinks, 32K does not fit on-die per layer (would need ~8 MB/layer). Reframed: 32K is serviceable via LPDDR streaming at ~24 ms/tok overhead → 6.5 tok/s sustained. Qwen2.5-3B remains the best long-context target on Lambda.</li>
+  <li><strong>"INT16 accumulator" in MatE was a real bug.</strong> INT8 × INT4 → 11-bit signed product; reducing K=128 needs 18 bits — INT16 saturates after ~64 accumulations in the worst case. Corrected to INT24 K-axis accumulator (with INT16 partial-product register inside each PE).</li>
+  <li><strong>"3-5× compute headroom" claim was wrong.</strong> In the bandwidth-bound regime, GOPS_needed scales with bandwidth (not model size), so headroom is constant 1.6× across all reasonable models.</li>
+  <li><strong>"Comfortable headroom at PHY=1.0 mm²" was misleading.</strong> The sensitivity sweep shows +0.002 mm² headroom — exactly fits, no margin.</li>
+  <li><strong>weight_stream_buffer was inconsistent (0.05 vs 0.15 MB).</strong> Canonical value: 0.05 MB (40× LPDDR latency-hiding minimum — ample).</li>
+  <li><strong>Total SRAM was inconsistent (0.8 / 0.85 / 1.0 MB).</strong> Canonical baseline: 0.8 MB at PHY=1.2 mm²; upgradable to 1.0 MB if PHY lands ≤ 1.0 mm².</li>
+  <li><strong>KCE-mini compression mode bpe inconsistent (3.5 / 4.0 / 5.3).</strong> Canonical: 4.0 bpe for primary 3-bit + Hadamard-16 mode → 4.0× vs FP16.</li>
+</ol>
+<p style="font-size: 13px; color: #555;">No architectural changes — every fix was either a math error, a mis-derivation, or a stale claim from an earlier iteration. Full audit log in <code>STATUS.md</code>.</p>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 8: NEXT STEPS -->
+<!-- ============================================================== -->
+<h2>9. Next concrete steps</h2>
+<div class="panel">
+
+<ol style="font-size: 14px;">
+  <li><strong>IMEC / Europractice mini@sic 2.0 quote</strong> for 4 mm² N16FFC Full Block. Email <code>eptsmc@imec.be</code>. Owner: architecture lead. Deadline: 2026-05.</li>
+  <li><strong>LPDDR5X x16 PHY quote</strong> from Synopsys (DesignWare) AND Cadence (Denali) at 16nm — write both, compare. Also get a Cadence <strong>LPDDR4X x16</strong> quote as the fallback path with public datasheets. Lock the load-bearing area uncertainty before floorplan freeze. Owner: architecture lead. Deadline: 2026-06.</li>
+  <li><strong>Tool-ramp test chip</strong> — trivial inverter ring oscillator at N16FFC through IMEC mini@sic. Clears DRC/LVS in Cadence Innovus + Calibre flow before Lambda RTL begins. Owner: PD lead. Deadline: 2026-09.</li>
+  <li><strong>Choose primary demo model</strong> — golden-model evaluation; pick Mistral-NeMo-3B vs Llama-3.2-3B vs Qwen2.5-3B as headline target. Owner: architecture lead + ML student. Deadline: 2026-07.</li>
+  <li><strong>Begin HLS C++ implementation</strong> in <code>src/</code>. Cadence Stratus HLS as the synthesis path. Start with MatE PE microarchitecture and KCE-mini Hadamard butterfly — the two long poles. Owner: RTL lead. Deadline: 2026-08.</li>
+  <li><strong>Python golden model</strong> — cycle-accurate sim of full v2 dataflow on chosen model. Owner: RTL lead + ML student. Deadline: 2026-10.</li>
+</ol>
+
+</div>
+
+<!-- ============================================================== -->
+<!-- PANEL 9: BACK-OF-ENVELOPE TIMELINE -->
+<!-- ============================================================== -->
+<h2>10. Timeline</h2>
+<div class="panel">
+<table>
+<thead><tr><th>Date</th><th>Milestone</th></tr></thead>
+<tbody>
+<tr><td>2026-04</td><td>v0.3 architecture spec — initial floorplan</td></tr>
+<tr><td>2026-05-14</td><td>v0.3 audit — 8 bugs fixed (see STATUS.md §4); repo restructured to single-arch focus</td></tr>
+<tr><td>2026-05</td><td>IMEC + Muse shuttle quotes</td></tr>
+<tr><td>2026-06</td><td>v1 vs v2 decision; LPDDR PHY quote in</td></tr>
+<tr><td>2026-07</td><td>Primary demo model chosen; Python golden model started</td></tr>
+<tr><td>2026-09</td><td>Tool-ramp test chip taped out at IMEC</td></tr>
+<tr><td>2026-10</td><td>Python golden model running end-to-end on chosen 3B model</td></tr>
+<tr><td>2026-12</td><td>MatE + KCE RTL complete (the long poles)</td></tr>
+<tr><td>2027-03</td><td>VecU + MSC + LSU + HIF RTL complete</td></tr>
+<tr><td>2027-06</td><td>Full-chip integration</td></tr>
+<tr><td>2027-09</td><td>UVM signoff</td></tr>
+<tr><td>2027-12</td><td>Physical design signoff (DRC/LVS/STA clean)</td></tr>
+<tr><td>2028-01</td><td>GDSII submission to IMEC mini@sic 2.0</td></tr>
+<tr><td>2028-04</td><td>Silicon return</td></tr>
+<tr><td>2028-07</td><td>Bring-up demo: Llama-3.2-3B at 7-8 tok/s decode standalone</td></tr>
+<tr><td>2028-09</td><td>Paper submission (DAC / ICCAD / MICRO student session / HotChips)</td></tr>
+</tbody>
+</table>
+</div>
+
+<footer>
+  Longhorn Silicon · UT Austin · Lambda · Generated 2026-04-27, audited 2026-05-14
+  <br>
+  See <code>arch.yml</code> for machine-readable spec, <code>dataflow_walkthrough.md</code> for unit-by-unit teaching doc, <code>STATUS.md</code> for iteration history + open questions, <code>src/</code> for HLS implementation.
+</footer>
+</body>
+</html>

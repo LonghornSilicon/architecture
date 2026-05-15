@@ -1,0 +1,22 @@
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# Python (for src/golden/ when we write goldens)
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Cadence Stratus / HLS / EDA build artifacts (for future src/blocks/*/build/)
+*.log
+*.rpt
+build/
+work/
+INCA_libs/

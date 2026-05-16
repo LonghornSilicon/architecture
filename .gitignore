@@ -20,3 +20,12 @@ __pycache__/
 build/
 work/
 INCA_libs/
+
+# Secrets / runner-local config (NEVER commit)
+.env
+*.pem
+*.key
+.longhorn/
+
+# Local Claude Code config and skills (per-developer, not shared)
+.claude/

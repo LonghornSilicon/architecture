@@ -1,0 +1,30 @@
+name: Sync to Cadence Chamber
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  sync:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_label:
+          - longhorn-chamber-alan
+          # Add teammates here as they onboard:
+          # - longhorn-chamber-richard
+          # - longhorn-chamber-chaithu
+    runs-on: [self-hosted, "${{ matrix.runner_label }}"]
+    concurrency:
+      group: chamber-sync-${{ matrix.runner_label }}
+      cancel-in-progress: false
+    timeout-minutes: 10
+    steps:
+      - name: Checkout (full history for git bundle)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync to chamber
+        run: bash .github/scripts/sync-chamber.sh

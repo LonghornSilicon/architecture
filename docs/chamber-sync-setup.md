@@ -96,13 +96,28 @@ chmod 600 ~/.longhorn/chamber.env
 
 `CHAMBER_PATH` is the canonical chamber-side repo location that `sync-promote` writes to. `CHAMBER_INBOX` is where bundles are deposited.
 
-## Step 4 — Store your chamber password in Keychain
+## Step 4 — Store your chamber password
+
+Two supported methods. Pick one.
+
+**Method A (recommended for self-hosted runners): put the password in `chamber.env`.**
+
+macOS Keychain's ACL model interacts poorly with LaunchAgent processes (the runner service runs as a LaunchAgent). The simplest reliable answer is a direct env var in the already-restricted `~/.longhorn/chamber.env` (mode 0600, gitignored). Security is practically equivalent: the file is readable only by your user, same as a Keychain entry created with `-A`.
+
+```bash
+echo "CHAMBER_PASSWORD=<your-chamber-password>" >> ~/.longhorn/chamber.env
+chmod 600 ~/.longhorn/chamber.env
+```
+
+**Method B (interactive/local-only): store in Keychain.**
+
+For one-off local runs of the script outside the runner service, the Keychain method works fine:
 
 ```bash
 security add-generic-password -s longhorn-chamber -a "$USER" -w
 ```
 
-Enter your chamber password at the prompt. (Don't pass it as `-w <value>` on the command line; that lands in shell history.)
+Enter your chamber password at the prompt. The script tries `CHAMBER_PASSWORD` first; if unset, it falls back to Keychain.
 
 ## Step 5 — Smoke test the sync script
 

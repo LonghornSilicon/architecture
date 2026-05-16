@@ -59,11 +59,20 @@ for bin in lftp sshpass git; do
   fi
 done
 
-KEYCHAIN_SERVICE="${CHAMBER_KEYCHAIN_SERVICE:-longhorn-chamber}"
-if ! PW=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$USER" -w 2>/dev/null); then
-  echo "::error::Keychain entry '$KEYCHAIN_SERVICE' not found for user $USER."
-  echo "::error::Run: security add-generic-password -s $KEYCHAIN_SERVICE -a \$USER -w"
-  exit 1
+# Resolve password. Two supported sources:
+#   1. CHAMBER_PASSWORD set in chamber.env (preferred for LaunchAgent contexts
+#      where macOS Keychain access is unreliable). File mode 0600 + gitignore
+#      provides equivalent practical security to Keychain -A.
+#   2. macOS Keychain (preferred for interactive / one-off runs).
+if [[ -n "${CHAMBER_PASSWORD:-}" ]]; then
+  PW="$CHAMBER_PASSWORD"
+else
+  KEYCHAIN_SERVICE="${CHAMBER_KEYCHAIN_SERVICE:-longhorn-chamber}"
+  if ! PW=$(security find-generic-password -s "$KEYCHAIN_SERVICE" -a "$USER" -w 2>/dev/null); then
+    echo "::error::No password source. Set CHAMBER_PASSWORD in ~/.longhorn/chamber.env"
+    echo "::error::OR add Keychain entry: security add-generic-password -s $KEYCHAIN_SERVICE -a \$USER -w"
+    exit 1
+  fi
 fi
 export SSHPASS="$PW"
 

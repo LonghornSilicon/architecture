@@ -1,238 +1,203 @@
 # Chamber Sync Setup
 
-Per-teammate one-time setup for the GitHub Actions self-hosted runner that pushes the repo to your Cadence chamber on every commit to `main`.
+One-time setup guide for getting `git push origin main` to automatically mirror this repo into your Cadence chamber home.
 
-## How it works
+## What you'll have when you're done
 
-The chamber's SFTP server (port 222) permits file creates but blocks overwrites and deletes. SSH `exec` is also blocked. Tree-level mirror tools (rsync, lftp mirror) cannot work against this. Solution: **git bundles**.
+- Every push to `main` on `github.com/LonghornSilicon/architecture` will, within ~10 seconds, drop a fresh git bundle into `~/inbox/` on your chamber account.
+- A single command in your chamber ETX shell (`sync-promote`) applies the bundle to `~/architecture/`, bringing it to whatever's on `main`.
+- The whole thing runs from a self-hosted GitHub Actions runner on your own Mac — no cloud servers, no shared infra.
 
-1. **Automatic upload (push side).** On every push to `main`, GitHub Actions queues one job per teammate listed in the workflow matrix. Each teammate's self-hosted runner (on their Mac) does `git bundle create architecture-<ts>-<sha>.bundle main HEAD` and SFTP-uploads the single bundle file to `~/inbox/architecture-<ts>-<sha>.bundle` on the chamber. The path is unique per push so no overwrite is needed.
+## Prerequisites
 
-2. **Manual promote (chamber side).** When you're ready to refresh `~/architecture/`, open ETX and run `sync-promote`. It picks the newest bundle in `~/inbox/`, runs `git fetch <bundle> main`, and `git reset --hard FETCH_HEAD` to move the current branch and update the working tree. (Fetching directly into the checked-out branch is refused by git, so we land in `FETCH_HEAD` first then reset.) Inside an interactive shell, `git` operates on the working tree via normal Linux syscalls. Bundle objects are content-addressed so fetch only writes new ones into `.git/objects/`.
+| Thing | Where | Why |
+|---|---|---|
+| Mac (macOS 12+) | Your laptop | Hosts the GitHub Actions runner |
+| Cadence chamber account | Provisioned by Cadence | `schwartz` for Alan, `richuang` for Richard, `tchaithu` for Chaithu |
+| Chamber password | Personal | Used by the runner to SFTP your bundles up |
+| GitHub admin on LonghornSilicon/architecture | Org | Needed to fetch a runner registration token |
+| UT Austin VPN connectivity from your Mac | Required | Chamber is on a private network |
 
-The "automatic + manual promote" split is what's possible without filing a Cadence support case to lift the SFTP write restriction. Bundles are tiny (a few MB even with full history), so accumulating them in `~/inbox/` is cheap.
+## Why this setup exists
 
-| Teammate | Runner label | CHAMBER_USER | CHAMBER_PATH (canonical) |
+The chamber blocks two operations we'd normally use for sync:
+- SSH `exec` is blocked, killing rsync over SSH and any "run a remote command" approach.
+- SFTP allows file creates but rejects overwrite and delete on existing files.
+
+So we use **git bundles**: each push produces a single bundle file with a unique name (no overwrite needed), the SFTP upload always succeeds, and a `git fetch` + `git reset --hard` from inside an ETX shell applies it. Git's object model handles deduplication so chamber disk grows only by the diff between commits, even though bundles contain full history.
+
+## Your label and paths
+
+| Teammate | Runner label | CHAMBER_USER | CHAMBER_PATH |
 |---|---|---|---|
 | Alan | `longhorn-chamber-alan` | `schwartz` | `/home/schwartz/architecture/` |
 | Richard | `longhorn-chamber-richard` | `richuang` | `/home/richuang/architecture/` |
 | Chaithu | `longhorn-chamber-chaithu` | `tchaithu` | `/home/tchaithu/architecture/` |
 
-Workflow matrix currently has only `longhorn-chamber-alan` enabled. Richard and Chaithu uncomment their lines in `.github/workflows/sync-chamber.yml` via PR after completing setup.
+These values plug into the steps below.
 
-## Prereqs (per Mac)
+---
+
+## Setup steps
+
+Run these on your Mac unless marked **[CHAMBER]**.
+
+### Step 1 — Install tools
 
 ```bash
-# 1. Homebrew (skip if installed)
+# Homebrew (skip if installed)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
-# 2. sshpass (password auth via Keychain)
+# Sync engine and password helper
 brew install hudochenkov/sshpass/sshpass
-
-# 3. lftp (SFTP upload engine)
 brew install lftp
-
-# 4. git is already on macOS via Xcode CLT, but make sure it's >= 2.0
-git --version
-
-# 5. Optional: gh CLI for repo management
 brew install gh
+
+# Verify git is recent enough
+git --version    # any 2.x is fine
 ```
 
-Chamber side requires `git` (any modern version supports bundles). Verify in an ETX shell:
+### Step 2 — Write your runner config
 
-```bash
-git --version
-git bundle --help | head -2     # should print man-page synopsis
-```
-
-## Step 1 — Install the runner
-
-Get a registration token from GitHub: visit `https://github.com/LonghornSilicon/architecture/settings/actions/runners/new` (requires admin on the repo). Copy the displayed token.
-
-```bash
-mkdir -p ~/actions-runner && cd ~/actions-runner
-
-# Check https://github.com/actions/runner/releases for current version
-RUNNER_VERSION="2.319.1"
-curl -O -L "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
-tar xzf "actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz"
-```
-
-Use `osx-x64` instead of `osx-arm64` on Intel Macs.
-
-## Step 2 — Register the runner
-
-```bash
-cd ~/actions-runner
-
-./config.sh \
-  --url https://github.com/LonghornSilicon/architecture \
-  --token <TOKEN> \
-  --labels self-hosted,<YOUR-LABEL> \
-  --name <YOUR-RUNNER-NAME> \
-  --unattended
-```
-
-Replace `<TOKEN>` with the value from GitHub. `<YOUR-LABEL>` is `longhorn-chamber-alan` / `-richard` / `-chaithu` per the table above. `<YOUR-RUNNER-NAME>` is anything descriptive (e.g., `alans-mbp`).
-
-## Step 3 — Create your chamber config
+This file holds your chamber connection details and password. It lives outside the repo (`~/.longhorn/chamber.env`) and is mode 0600 so only your user can read it.
 
 ```bash
 mkdir -p ~/.longhorn
 
-# Substitute YOUR values for CHAMBER_USER and CHAMBER_PATH
 cat > ~/.longhorn/chamber.env <<'EOF'
 CHAMBER_HOST=10.2.6.6
 CHAMBER_PORT=222
-CHAMBER_USER=schwartz
-CHAMBER_PATH=/home/schwartz/architecture/
-CHAMBER_INBOX=/home/schwartz/inbox/
-CHAMBER_KEYCHAIN_SERVICE=longhorn-chamber
+CHAMBER_USER=<your-chamber-user>
+CHAMBER_PATH=/home/<your-chamber-user>/architecture/
+CHAMBER_INBOX=/home/<your-chamber-user>/inbox/
+CHAMBER_PASSWORD=<your-chamber-password>
 EOF
 
 chmod 600 ~/.longhorn/chamber.env
 ```
 
-`CHAMBER_PATH` is the canonical chamber-side repo location that `sync-promote` writes to. `CHAMBER_INBOX` is where bundles are deposited.
+Substitute the values from the table above plus your password. `chamber.env` is gitignored — it will never end up in the repo.
 
-## Step 4 — Store your chamber password
+### Step 3 — Smoke-test the sync script standalone
 
-Two supported methods. Pick one.
-
-**Method A (recommended for self-hosted runners): put the password in `chamber.env`.**
-
-macOS Keychain's ACL model interacts poorly with LaunchAgent processes (the runner service runs as a LaunchAgent). The simplest reliable answer is a direct env var in the already-restricted `~/.longhorn/chamber.env` (mode 0600, gitignored). Security is practically equivalent: the file is readable only by your user, same as a Keychain entry created with `-A`.
+Before involving GitHub Actions, run the script directly to confirm bundle creation and upload work from your Mac.
 
 ```bash
-echo "CHAMBER_PASSWORD=<your-chamber-password>" >> ~/.longhorn/chamber.env
-chmod 600 ~/.longhorn/chamber.env
-```
-
-**Method B (interactive/local-only): store in Keychain.**
-
-For one-off local runs of the script outside the runner service, the Keychain method works fine:
-
-```bash
-security add-generic-password -s longhorn-chamber -a "$USER" -w
-```
-
-Enter your chamber password at the prompt. The script tries `CHAMBER_PASSWORD` first; if unset, it falls back to Keychain.
-
-## Step 5 — Smoke test the sync script
-
-```bash
-cd "/Users/$USER/Downloads/Longhorn Silicon/architecture"
+cd "/path/to/your/architecture/clone"
 bash .github/scripts/sync-chamber.sh
 ```
 
-Expected output (final lines):
+You should see something like:
 ```
-Bundle: /tmp/architecture-20260515T231540Z-abc1234.bundle (2.0M)
-Target: schwartz@10.2.6.6:/home/schwartz/inbox/architecture-20260515T231540Z-abc1234.bundle
-[... transfer log ...]
+Bundling main (HEAD=abcd123)...
+Bundle: /var/folders/.../architecture-20260516T001620Z-abcd123.bundle (500K)
+Target: <your-user>@10.2.6.6:/home/<your-user>/inbox/architecture-20260516T001620Z-abcd123.bundle
 
-Uploaded: /home/schwartz/inbox/architecture-20260515T231540Z-abc1234.bundle
+Uploaded: /home/<your-user>/inbox/architecture-20260516T001620Z-abcd123.bundle
 
 To promote in chamber (from an ETX shell):
     sync-promote
-  or manually:
-    cd ~/architecture && git fetch '/home/schwartz/inbox/architecture-20260515T231540Z-abc1234.bundle' main:refs/heads/main && git reset --hard main
 ```
 
-First run pops a macOS Keychain access dialog. Click **Always Allow**.
+If you see `Uploaded:`, the upload half works.
 
-## Step 6 — Bootstrap the chamber-side repo (ONE TIME)
+### Step 4 — **[CHAMBER]** Bootstrap your chamber-side repo (one time)
 
-The first bundle has to be cloned manually because there's no `~/architecture/` repo yet to `git fetch` into. After this one-time step, all future pushes are handled by `sync-promote`.
+Open an ETX session on the chamber and paste:
 
-In an ETX shell on the chamber:
-
-```bash
-# 1. Make sure the inbox exists (it does after Step 5)
-ls -la ~/inbox/
-
-# 2. Pick the latest bundle (only one if this is the first push)
-ls -t ~/inbox/architecture-*.bundle | head -1
-
-# 3. Remove any pre-existing ~/architecture/ from earlier scp transfers
-rm -rf ~/architecture
-
-# 4. Clone from the bundle into ~/architecture
-git clone "$(ls -t ~/inbox/architecture-*.bundle | head -1)" ~/architecture
-
-# 5. Verify
+```tcsh
+cd ~
+rm -rf architecture     # clean any prior state from manual scp/lftp experiments
+git clone /home/<your-chamber-user>/inbox/architecture-*.bundle ~/architecture
 cd ~/architecture
-git log -1 --oneline
-ls
-
-# 6. The bundle path is baked into the clone's origin. Clear it so future
-#    fetches use the path provided each time.
 git remote remove origin
+git log -1 --oneline    # should show the latest commit on main
 ```
 
-After Step 6 you have a real git repo at `~/architecture/` with full history.
+After this, you have a real git repo at `~/architecture/` that future syncs will update incrementally.
 
-## Step 7 — Install the `sync-promote` helper on the chamber
+### Step 5 — **[CHAMBER]** Install the `sync-promote` helper
 
-This is the chamber-side glue. Default chamber shell is tcsh; pick your variant.
+This is what you'll run in ETX whenever you want your chamber tree to catch up to `main`. It lives at `~/bin/sync-promote` and just does `git fetch` from the newest bundle + `git reset --hard`.
 
-**tcsh** (default on chamber). Append to `~/.cshrc`:
-
-```tcsh
-alias sync-promote 'set _b=`ls -t ~/inbox/architecture-*.bundle |& head -1`; if ("$_b" == "") then; echo "no bundles in ~/inbox/"; else; cd ~/architecture && git fetch "$_b" main && git reset --hard FETCH_HEAD && echo "promoted to `git log -1 --oneline` from $_b"; endif; unset _b'
-```
-
-**bash**. Append to `~/.bashrc`:
+Easiest way to get the script onto the chamber: have someone with a working Mac-side runner SFTP it to you (see "Helping a new teammate" below), or paste it manually if your ETX terminal supports paste:
 
 ```bash
-sync-promote() {
-  local b
-  b=$(ls -t ~/inbox/architecture-*.bundle 2>/dev/null | head -1)
-  if [[ -z "$b" ]]; then echo "no bundles in ~/inbox/"; return 1; fi
-  cd ~/architecture || return 1
-  # Fetch into FETCH_HEAD (can't fetch directly into the checked-out branch),
-  # then reset --hard to move main and update the working tree.
-  git fetch "$b" main
-  git reset --hard FETCH_HEAD
-  echo "promoted to $(git log -1 --oneline) from $b"
-}
+#!/bin/bash
+set -e
+b=$(ls -t ~/inbox/architecture-*.bundle 2>/dev/null | head -1)
+if [ -z "$b" ]; then
+  echo "no bundles in ~/inbox/"
+  exit 1
+fi
+cd ~/architecture
+git fetch "$b" main
+git reset --hard FETCH_HEAD
+echo "promoted to $(git log -1 --oneline) from $b"
 ```
 
-Reload your shell or `source ~/.cshrc` / `source ~/.bashrc`. Test:
+Save as `~/bin/sync-promote`, then `chmod 755 ~/bin/sync-promote`.
+
+Test it (should report "Already up to date" since you just cloned):
+```bash
+~/bin/sync-promote
+```
+
+### Step 6 — Install the GitHub Actions runner
+
+Get a registration token: visit `https://github.com/LonghornSilicon/architecture/settings/actions/runners/new` in a browser, scroll to find the `--token <TOKEN>` value on that page, copy it. (Token expires in 1 hour, so move quickly.)
 
 ```bash
-sync-promote
+mkdir -p ~/actions-runner && cd ~/actions-runner
+
+# Get the current version from https://github.com/actions/runner/releases
+RUNNER_VERSION="2.334.0"
+curl -O -L https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz
+tar xzf actions-runner-osx-arm64-${RUNNER_VERSION}.tar.gz
 ```
 
-Should report something like `promoted to abc1234 (HEAD) latest commit subject from /home/schwartz/inbox/architecture-...bundle`.
+Use `osx-x64` instead of `osx-arm64` on Intel Macs.
 
-Optional cleanup helper (removes bundles older than 7 days):
-
-**tcsh**:
-```tcsh
-alias sync-prune 'find ~/inbox -maxdepth 1 -name "architecture-*.bundle" -mtime +7 -print -exec rm -f {} \;'
-```
-
-**bash**:
-```bash
-sync-prune() {
-  find ~/inbox -maxdepth 1 -name 'architecture-*.bundle' -mtime +7 -print -exec rm -f {} +
-}
-```
-
-## Step 8 — Start the runner as a background service
+### Step 7 — Register your runner with the right label
 
 ```bash
 cd ~/actions-runner
-./svc.sh install
-./svc.sh start
-./svc.sh status   # should show "active (running)"
+./config.sh \
+  --url https://github.com/LonghornSilicon/architecture \
+  --token <PASTE-TOKEN-HERE> \
+  --labels self-hosted,<your-runner-label> \
+  --name <your-mac-name> \
+  --unattended
 ```
 
-The runner polls GitHub. Every push to `main` triggers a new bundle upload.
+`<your-runner-label>` is `longhorn-chamber-alan` / `-richard` / `-chaithu`. `<your-mac-name>` is anything descriptive (e.g., `alans-mbp`).
 
-## Step 9 — End-to-end test
+### Step 8 — Install as a background service
+
+```bash
+cd ~/actions-runner
+./svc.sh install      # registers a macOS LaunchAgent under ~/Library/LaunchAgents/
+./svc.sh start        # starts the runner polling GitHub
+./svc.sh status       # confirm "active (running)"
+```
+
+This installs the runner as a user-level LaunchAgent. No `sudo` needed. The runner auto-starts on login. It will keep running in the background as long as your Mac is awake.
+
+### Step 9 — Wire up the workflow matrix
+
+If your label is already listed in `.github/workflows/sync-chamber.yml`, skip this. Otherwise, open a PR that uncomments your line:
+
+```yaml
+matrix:
+  runner_label:
+    - longhorn-chamber-alan
+    - longhorn-chamber-richard       # uncomment when Richard onboards
+    # - longhorn-chamber-chaithu
+```
+
+Merge to main. Your next push will trigger sync for all listed teammates in parallel.
+
+### Step 10 — End-to-end test
 
 From your local clone:
 ```bash
@@ -241,66 +206,108 @@ git add -A && git commit -m "test: chamber sync trigger"
 git push origin main
 ```
 
-Watch the run at `https://github.com/LonghornSilicon/architecture/actions`. Should complete in <1 min.
+Watch the run at `https://github.com/LonghornSilicon/architecture/actions`. Should complete in <30s.
 
 In ETX:
 ```bash
-ls -t ~/inbox/architecture-*.bundle | head -1   # see the new bundle
-sync-promote                                     # apply it
-git log -1                                       # confirm chamber is now at the new commit
+ls -t ~/inbox/architecture-*.bundle | head -1      # see the new bundle
+~/bin/sync-promote                                  # apply it
+git log -1                                          # confirm chamber is now at the new commit
 ```
 
-## Mirror semantics (read this once)
+If you see the test commit on the chamber, you're done.
 
-After `sync-promote`, `~/architecture/` exactly matches what was on `main` at the time of the push that produced the latest bundle. `git reset --hard` is destructive to local changes inside `~/architecture/`.
+---
 
-- **Do not modify files inside `~/architecture/` on the chamber.** They get overwritten on the next promote.
-- **Chamber-side scratch work** (sim outputs, intermediate Tcl, `xrun.log`, build artifacts) **must live OUTSIDE `~/architecture/`**. Recommended: `~/chamber_work/` (create yourself, never touched by sync).
-- Bundles in `~/inbox/` are append-only. Run `sync-prune` periodically.
+## After it's working
 
-## Mac sleep / availability
+### Mirror semantics — important
 
-If your Mac sleeps, queued GH Actions jobs wait until it wakes.
+`sync-promote` does `git reset --hard`, which is destructive to anything inside `~/architecture/` on the chamber. **Do not edit files in `~/architecture/` directly on the chamber.** Use it as a read-only point-in-time snapshot of `main`.
+
+Chamber-side scratch work (sim outputs, intermediate Tcl, `xrun.log`, build artifacts) **must live OUTSIDE `~/architecture/`**. Recommended: `~/chamber_work/` (you create this yourself).
+
+### Keeping your Mac available
+
+The runner only picks up jobs while your Mac is awake.
 
 ```bash
-# While runner is active, keep Mac awake
+# Keep awake while runner is active
 caffeinate -di &
 
-# Or persistent (no sleep on AC power)
+# Or persistent (never sleep on AC power)
 sudo pmset -c sleep 0
 ```
 
-For Phase 1 (Alan only), neither is strictly required.
+If your Mac sleeps mid-day, pushes queue. They run when it wakes. No data is lost.
 
-## Common failure modes
+### Cleaning up old bundles
+
+Bundles accumulate in `~/inbox/`. They're small (~500 KB each) but worth pruning occasionally. From ETX:
+
+```bash
+find ~/inbox -name 'architecture-*.bundle' -mtime +7 -delete
+```
+
+You can alias this as `sync-prune` if you do it often.
+
+### Rotating your chamber password
+
+If you change your chamber password (`passwd` from ETX), update `CHAMBER_PASSWORD=` in `~/.longhorn/chamber.env` on your Mac. No code change, no restart.
+
+---
+
+## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Workflow shows "queued" forever | No runner online with matching label | `cd ~/actions-runner && ./svc.sh start` |
+| Workflow shows "Queued" forever | Your runner isn't online | `cd ~/actions-runner && ./svc.sh start` |
 | `lftp: command not found` | Not installed | `brew install lftp` |
 | `sshpass: command not found` | Not installed | `brew install hudochenkov/sshpass/sshpass` |
-| `git: command not found` (CI) | Should never happen on macOS runner | Install Xcode CLT: `xcode-select --install` |
-| Keychain dialog every run | "Always Allow" was not selected | Re-run Step 5, click "Always Allow" |
-| `dest open ... Permission denied` on bundle upload | Bundle filename collided (same timestamp + same SHA, very rare) | Wait 1s and retry, or `rm` the offending bundle in ETX |
-| `Connection timed out` | Not on UT Austin VPN, or chamber is down | Confirm VPN, try `sshpass -e sftp -P 222 ... schwartz@10.2.6.6` manually |
-| `sync-promote: no bundles in ~/inbox/` | Workflow never landed a bundle (or already cleaned) | Push a commit to main, wait, retry |
-| `git fetch` fails with "couldn't find remote ref main" | Bundle was built from a checkout that doesn't have main | Probably shallow CI checkout. Confirm `fetch-depth: 0` in workflow. |
-| `git fetch` fails with "fatal: not a git repository" | Bootstrap (Step 6) wasn't done | Do Step 6, then retry |
+| `git: command not found` | Should never happen on macOS | `xcode-select --install` |
+| `No password source` | `CHAMBER_PASSWORD=` missing from chamber.env | Add it: `echo "CHAMBER_PASSWORD=<pw>" >> ~/.longhorn/chamber.env` |
+| `dest open ... Permission denied` on bundle upload | Filename collision (same SHA + same timestamp second) | Wait 1s and retry, or `rm` the offending bundle in ETX |
+| `Connection timed out` | Not on UT Austin VPN, or chamber is down | Confirm VPN, try `sshpass -e sftp -P 222 ... <user>@10.2.6.6` manually |
+| `sync-promote: no bundles` | Workflow never landed a bundle, or all pruned | Push a commit to main, wait, retry |
+| `git fetch` fails with "couldn't find remote ref main" | Bundle was built from a shallow checkout | Confirm `fetch-depth: 0` in workflow (it is, by default in our setup) |
+| `git fetch` fails with "not a git repository" | Step 4 (bootstrap) wasn't done | Do Step 4 |
+| Keychain entry not found (when using Method B) | LaunchAgent can't reach Keychain | Switch to Method A (CHAMBER_PASSWORD in chamber.env) |
 
-## Phase B: if Cadence lifts the SFTP write restriction
+---
 
-If a support case enables normal SFTP write (overwrite + delete) for your account, you could switch back to a true tree-mirror with `rsync` or `lftp mirror --delete`. The bundle approach has its own advantages even with full SFTP write (incremental object transfer via git's dedup, real git repo on chamber), so probably not worth switching back.
+## Helping a new teammate set up
 
-## Updating the matrix when a teammate onboards
+When the next teammate (Richard, Chaithu, etc.) starts setup, they need:
 
-Once Richard or Chaithu has completed Steps 1 through 8, uncomment their line in `.github/workflows/sync-chamber.yml`:
+1. The doc you're reading.
+2. Their personal chamber credentials (CHAMBER_USER + password from Cadence).
+3. The `sync-promote` script on their chamber. If they can't paste into their ETX, you can SFTP it from your Mac to their inbox:
+   ```bash
+   sshpass -e sftp -P 222 -o HostKeyAlgorithms=+ssh-rsa -o PubkeyAcceptedAlgorithms=+ssh-rsa \
+     <their-user>@10.2.6.6 <<EOF
+   put /path/to/sync-promote bin/sync-promote
+   chmod 755 bin/sync-promote
+   bye
+   EOF
+   ```
+   (They'd need to provide their password via Keychain or `SSHPASS` env var first.)
 
-```yaml
-matrix:
-  runner_label:
-    - longhorn-chamber-alan
-    - longhorn-chamber-richard       # uncommented after Richard onboards
-    # - longhorn-chamber-chaithu
-```
+After they finish Steps 1-8, open a PR uncommenting their line in `.github/workflows/sync-chamber.yml`. Once merged, every push syncs to all listed teammates in parallel.
 
-Push the change. Their next push triggers parallel syncs for all listed teammates.
+---
+
+## Reference: How it works under the hood
+
+**The runner.** GitHub Actions hosts the workflow definition; the actual job execution happens on a self-hosted runner you registered. The runner is a small .NET process (`Runner.Listener`) installed at `~/actions-runner/` and managed by a macOS LaunchAgent at `~/Library/LaunchAgents/actions.runner.<repo>.<name>.plist`. It long-polls `api.github.com` waiting for jobs labeled with its labels. When a push to `main` happens, GitHub queues the workflow's `sync` job; your runner's label match means it claims the job, checks out the repo with full history, runs `bash .github/scripts/sync-chamber.sh`, and reports the result back.
+
+**The bundle upload.** The script does `git bundle create main HEAD` to produce a single binary file containing the full history of main. It then `lftp put`s that file to `<your-chamber-user>@10.2.6.6:~/inbox/architecture-<timestamp>-<sha>.bundle` over SFTP port 222. The unique filename per push sidesteps the chamber's SFTP write-once policy.
+
+**The promote.** On chamber, `~/bin/sync-promote` finds the newest bundle, runs `git fetch <bundle> main` (lands in `FETCH_HEAD`), and `git reset --hard FETCH_HEAD` to advance `main` and update the working tree. Git's object store dedups: even though every bundle has full history, only new objects get written to `~/architecture/.git/objects/`.
+
+**The auth.** Two supported paths:
+- **Method A (used by the runner):** `CHAMBER_PASSWORD=` in `~/.longhorn/chamber.env`. The script exports it to `SSHPASS` for sshpass-based password auth.
+- **Method B (for interactive local runs):** macOS Keychain. Script falls back to this when `CHAMBER_PASSWORD` is unset.
+
+The script auto-detects which is available. Don't put `CHAMBER_PASSWORD` in the repo — `.longhorn/` is gitignored.
+
+**Future: SSH key auth.** If Cadence installs your public key in `~/.ssh/authorized_keys` on the chamber, the script supports key auth via `CHAMBER_SSH_KEY=` in chamber.env. Eliminates the need to store passwords anywhere. Worth filing a Cadence support case for once setup is stable.

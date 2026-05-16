@@ -1,4 +1,9 @@
-name: Sync to Cadence Chamber
+name: Cadence Chamber Sync
+
+# Triggered on every push to main. Each teammate listed in the matrix has a
+# self-hosted runner registered with their own unique label
+# (longhorn-chamber-<name>). The matrix fans out one job per teammate so each
+# of their chamber homes stays current. See docs/chamber-sync-setup.md.
 
 on:
   push:
@@ -22,7 +27,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout (full history for git bundle)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 

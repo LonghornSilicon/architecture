@@ -88,8 +88,20 @@ fi
 
 # ---- Run headless ----------------------------------------------------------
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
-tag="stratus.$(basename "$project_dir").batch.${config}"
+# Convention check: <block>/stratus/project.tcl -> use block name, not "stratus"
+project_parent_name="$(basename "$project_dir")"
+if [[ "$project_parent_name" == "stratus" ]]; then
+    tag_name="$(basename "$(dirname "$project_dir")")"
+else
+    tag_name="$project_parent_name"
+fi
+tag="stratus.${tag_name}.batch.${config}"
 log_file="$LAMBDA_LOGS/${tag}.${timestamp}.log"
+mkdir -p "$LAMBDA_LOGS" 2>/dev/null
+if [[ ! -w "$LAMBDA_LOGS" ]]; then
+    echo "WARN: $LAMBDA_LOGS not writable; falling back to /tmp for logs" >&2
+    log_file="/tmp/$(basename "$log_file")"
+fi
 
 echo "Running cynth $config"
 echo "  project: $project_abs"

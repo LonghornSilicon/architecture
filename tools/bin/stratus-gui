@@ -98,8 +98,16 @@ EOF
 fi
 
 # ---- Detach GUI ------------------------------------------------------------
-# Tag identifies this launch in logs: stratus.<parent-dir-name>.gui
-tag="stratus.$(basename "$project_dir").gui"
+# Tag identifies this launch in logs. Convention check: if the project lives
+# in <block>/stratus/project.tcl, use the BLOCK name (parent of stratus/),
+# not "stratus" itself, so logs read "stratus.mate.gui" not "stratus.stratus.gui".
+project_parent_name="$(basename "$project_dir")"
+if [[ "$project_parent_name" == "stratus" ]]; then
+    tag_name="$(basename "$(dirname "$project_dir")")"
+else
+    tag_name="$project_parent_name"
+fi
+tag="stratus.${tag_name}.gui"
 
 cd "$project_dir"
 gui_detach "$tag" stratus_ide -prj "$(basename "$project_abs")"

@@ -50,6 +50,16 @@ gui_detach() {
     local log_file="$LAMBDA_LOGS/${tag}.${timestamp}.log"
     local pid_file="/tmp/lambda-${tag}.$$.pid"
 
+    # Defensive: ensure the log dir exists at launch time. /rscratch is
+    # node-local on some chambers, so install.sh's mkdir on the utility node
+    # doesn't propagate to compute nodes. If we still can't write, fall back
+    # to /tmp so the GUI actually starts (with a warning).
+    mkdir -p "$(dirname "$log_file")" 2>/dev/null
+    if [[ ! -w "$(dirname "$log_file")" ]]; then
+        echo "WARN: $(dirname "$log_file") not writable; falling back to /tmp for logs" >&2
+        log_file="/tmp/$(basename "$log_file")"
+    fi
+
     # nohup + redirect: stdin from /dev/null avoids tty-output suspension,
     # &> sends both stdout and stderr to the log, & backgrounds the process.
     nohup "$tool" "$@" </dev/null &>"$log_file" &

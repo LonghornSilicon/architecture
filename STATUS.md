@@ -166,13 +166,21 @@ These are the architecture deep dives queued behind the bug fixes and cleanup. T
 
 ---
 
-## 8. The two non-architectural risks that still worry me
+## 8. Risks that still worry me
+
+**Non-architectural:**
 
 - **IMEC mini@sic 2.0 actual pricing for 4 mm² N16FFC.** Pricing is non-public; ranges are academic-discount-tier estimates. A $120K or $150K return would not kill the project but would change the funding plan.
 
 - **The LPDDR PHY tape-out itself.** First FinFET-era PHY for the team. Senior PD engineer or partner is a hard prerequisite (R-Lv2-01). LPDDR4X fallback (§5) materially de-risks but at the cost of model class.
 
-Both are recoverable; neither is a kill. The architecture is sound.
+**Architectural / research-claim:**
+
+- **INT24 K-axis accumulator margin is tight at FFN down-projection.** For Llama-3.2-3B (FFN intermediate = 8192, per `dataflow_walkthrough.md` Stage 11), reducing K=8192 INT8×INT4 products has worst-case sum 8192 × 1024 = 8,388,608, exceeding INT24's signed positive max (+8,388,607) by 1 in the asymmetric (−128 × −8) corner. The MatE `accumulator_rationale` field in `arch.yml` cites the K=4096 case where INT24 fits comfortably; K=8192 (the actual FFN-down K for the 3B Llama family) is at the saturation edge. The asymmetric corner is astronomically unlikely on real activations but mathematically real, and the spec rationale should cite the workload's actual K rather than 4096. **Fallback:** INT26 or INT28 K-axis accumulator (logic effectively free at 16nm; cost is wire width on the column-output reduction tree, not gate count). Mitigation: Python numerical sweep against real Llama-3.2-3B FFN-down activations pre-HLS, plus an arch.yml rationale rewrite to cite K=8192. Tracked in `docs/handoff.md` §3.2 #2.
+
+- **Compressed-domain attention quality at 16-pt / 4.0 bpe is the chip's headline research claim and has not been empirically validated.** TurboQuant's published quality-neutral result (arXiv 2504.19874, ICLR'26) is at **32-pt Hadamard / 3.5 bpe**. Lambda's KCE-mini runs **16-pt / 4.0 bpe** — higher per-group overhead (1.0 vs 0.5 bit/elem in the per-group scale), one fewer Hadamard mixing stage. Quality probably holds (the rotation theory doesn't depend on Hadamard size in the limit), but the empirical evidence in the literature is at 32-pt only. **Fallback:** the `bypass_fp16` CSR mode in KCE-mini (mode 5 of 5 in `arch.yml` `kv_compression_engine.operating_modes`) keeps the architecture functional at 16 bpe / 1× compression if 16-pt degrades; the headline reverts to "standalone academic accelerator at this scale" without the rotation-codebook-on-silicon first. Mitigation: MMLU + LongBench + Needle-in-Haystack on Llama-3.2-3B at W4A8 + TurboQuant 4.0 bpe, owned by ML student, pre-HLS commit. Tracked in `docs/handoff.md` §3.3 #9.
+
+All four are recoverable; none is a kill. The architecture is sound.
 
 ---
 

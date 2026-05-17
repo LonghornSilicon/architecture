@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+# ============================================================================
+# lambda-diagnose
+# ----------------------------------------------------------------------------
+# Lambda-aware chamber diagnostic. Runs chamber-diagnose first (generic
+# environment checks), then adds Lambda-specific checks:
+#   - LAMBDA_ROOT exists and is a git repo
+#   - Per-block stratus/project.tcl presence
+#   - Build dir state
+# ============================================================================
+
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/lambda-env.sh
+source "$SCRIPT_DIR/../lib/lambda-env.sh"
+
+# ---- ANSI cosmetic helpers (mirror chamber-diagnose) ----------------------
+if [[ -t 1 ]]; then
+    GREEN=$'\e[32m'; RED=$'\e[31m'; YELLOW=$'\e[33m'; BOLD=$'\e[1m'; RESET=$'\e[0m'
+else
+    GREEN=""; RED=""; YELLOW=""; BOLD=""; RESET=""
+fi
+
+ok()      { echo "  ${GREEN}[OK]${RESET}    $*"; }
+fail()    { echo "  ${RED}[FAIL]${RESET}  $*"; }
+warn()    { echo "  ${YELLOW}[WARN]${RESET}  $*"; }
+info()    { echo "          $*"; }
+section() { echo ""; echo "${BOLD}=== $1 ===${RESET}"; }
+
+# ---- Run generic chamber checks first -------------------------------------
+"$SCRIPT_DIR/chamber-diagnose"
+
+# ---- Lambda-specific section ----------------------------------------------
+section "Lambda repo state"
+
+if [[ -d "$LAMBDA_ROOT" ]]; then
+    ok "LAMBDA_ROOT=$LAMBDA_ROOT"
+else
+    fail "LAMBDA_ROOT=$LAMBDA_ROOT does not exist"
+    info "Fix: sync-promote (from the chamber-sync-setup.md flow)"
+    exit 1
+fi
+
+if [[ -d "$LAMBDA_ROOT/.git" ]]; then
+    head_sha=$(cd "$LAMBDA_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "?")
+    head_msg=$(cd "$LAMBDA_ROOT" && git log -1 --pretty=format:"%s" 2>/dev/null | head -c 60)
+    ok "git repo: HEAD=$head_sha ($head_msg)"
+else
+    warn "LAMBDA_ROOT is not a git repo"
+fi
+
+if [[ -f "$LAMBDA_ROOT/arch.yml" ]]; then
+    ok "arch.yml present"
+else
+    fail "arch.yml missing from $LAMBDA_ROOT"
+fi
+
+section "Per-block Stratus project files"
+for block in "${LAMBDA_BLOCKS[@]}"; do
+    project_file="$LAMBDA_ROOT/src/blocks/$block/stratus/project.tcl"
+    if [[ -f "$project_file" ]]; then
+        ok "$block: stratus/project.tcl"
+    else
+        warn "$block: no stratus/project.tcl yet (HLS not started)"
+    fi
+done
+
+section "Build output dir"
+if [[ -d "$LAMBDA_BUILD" ]]; then
+    size=$(du -sh "$LAMBDA_BUILD" 2>/dev/null | cut -f1)
+    ok "LAMBDA_BUILD=$LAMBDA_BUILD ($size)"
+else
+    info "LAMBDA_BUILD=$LAMBDA_BUILD (empty; will be created by first batch run)"
+fi
+
+echo ""
+echo "${BOLD}Done.${RESET} Lambda environment ready for: lambda-stratus <block> {gui|batch <config>}"

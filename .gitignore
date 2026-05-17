@@ -14,12 +14,28 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
-# Cadence Stratus / HLS / EDA build artifacts (for future src/blocks/*/build/)
+# Cadence Stratus / HLS / EDA build artifacts
+# tools/install.sh creates ~/architecture/build/ on the chamber for regenerable
+# Stratus / Genus / Innovus output; never commit it.
+build/
 *.log
 *.rpt
-build/
 work/
 INCA_libs/
+# Stratus working dirs (per-config under src/blocks/<block>/stratus/)
+*bdw_work/
+*scverify_work/
+*.bdw_work/
+*.scverify_work/
+# SimVision / Xcelium databases
+*.shm/
+xcelium.d/
+xrun.history
+xrun.key
+xmsim.key
+# Stratus IDE per-user state (lives next to project.tcl; don't commit)
+.stratus/
+*.stratus-prj/
 
 # Secrets / runner-local config (NEVER commit)
 .env

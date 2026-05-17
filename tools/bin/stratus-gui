@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# ============================================================================
+# stratus-gui
+# ----------------------------------------------------------------------------
+# Generic Stratus HLS IDE launcher. Project-agnostic: works on any project.tcl
+# in any directory. The Lambda-aware wrapper `lambda-stratus` delegates here.
+#
+# Usage:
+#   stratus-gui                        # auto-detects ./project.tcl
+#                                      # or ./stratus/project.tcl
+#   stratus-gui <path-to-project.tcl>
+#
+# What it does:
+#   1. Sources lambda-env.sh to set log paths + module pin.
+#   2. Resolves project.tcl (explicit arg, or auto-detect in CWD).
+#   3. Loads the Stratus module.
+#   4. Detaches stratus_ide -prj <file> via gui_detach (logs to scratch).
+# ============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/lambda-env.sh
+source "$SCRIPT_DIR/../lib/lambda-env.sh"
+# shellcheck source=../lib/lambda-detach.sh
+source "$SCRIPT_DIR/../lib/lambda-detach.sh"
+
+# ---- Resolve project file --------------------------------------------------
+project_file="${1:-}"
+
+if [[ -z "$project_file" ]]; then
+    if [[ -f ./project.tcl ]]; then
+        project_file="./project.tcl"
+    elif [[ -f ./stratus/project.tcl ]]; then
+        project_file="./stratus/project.tcl"
+    else
+        cat >&2 <<EOF
+ERROR: no project file given, and none auto-detected in $(pwd).
+
+Looked for:
+  ./project.tcl
+  ./stratus/project.tcl
+
+Usage: stratus-gui [path-to-project.tcl]
+EOF
+        exit 1
+    fi
+fi
+
+if [[ ! -f "$project_file" ]]; then
+    echo "ERROR: project file not found: $project_file" >&2
+    exit 1
+fi
+
+# Absolute path for the IDE (otherwise the cd below breaks the reference)
+project_abs="$(cd "$(dirname "$project_file")" && pwd)/$(basename "$project_file")"
+project_dir="$(dirname "$project_abs")"
+
+# ---- Load Stratus module ---------------------------------------------------
+if ! type module >/dev/null 2>&1; then
+    echo "ERROR: module command not available." >&2
+    echo "Hint:  run lambda-diagnose for full chamber probe." >&2
+    exit 1
+fi
+
+if ! module load "$STRATUS_MODULE" 2>/dev/null; then
+    cat >&2 <<EOF
+ERROR: 'module load $STRATUS_MODULE' failed.
+
+Possible causes:
+  - Wrong version pinned in tools/lib/lambda-env.sh
+  - Override needed in ~/.longhorn/lambda.env (STRATUS_MODULE=...)
+  - Modules system not initialized in this shell
+
+Check available versions:
+  module avail stratus
+EOF
+    exit 1
+fi
+
+# ---- Detach GUI ------------------------------------------------------------
+# Tag identifies this launch in logs: stratus.<parent-dir-name>.gui
+tag="stratus.$(basename "$project_dir").gui"
+
+cd "$project_dir"
+gui_detach "$tag" stratus_ide -prj "$(basename "$project_abs")"

@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# ============================================================================
+# stratus-batch
+# ----------------------------------------------------------------------------
+# Generic Stratus HLS headless runner. Runs `cynth <config>` on a project.tcl
+# without opening the IDE. Suitable for CI, overnight regression, or any
+# workflow that doesn't need the schedule viewer.
+#
+# Usage:
+#   stratus-batch <config>                        # auto-detects project.tcl
+#   stratus-batch <config> <path-to-project.tcl>
+#
+# Example:
+#   stratus-batch BASIC                           # in src/blocks/mate/stratus/
+#   stratus-batch BASIC src/blocks/mate/stratus/project.tcl
+#
+# Output:
+#   - RTL lands under the project's working dir as configured by project.tcl
+#     (Lambda convention: $LAMBDA_BUILD/<block>/stratus/<config>/)
+#   - Combined stdout/stderr is tee'd to:
+#       $LAMBDA_LOGS/stratus.<dir>.batch.<config>.<UTC-timestamp>.log
+#   - Exit code matches Stratus's exit code.
+# ============================================================================
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/lambda-env.sh
+source "$SCRIPT_DIR/../lib/lambda-env.sh"
+
+# ---- Arg parsing -----------------------------------------------------------
+config="${1:-}"
+if [[ -z "$config" ]]; then
+    cat >&2 <<EOF
+ERROR: missing config name.
+
+Usage: stratus-batch <config> [project.tcl]
+Example: stratus-batch BASIC
+EOF
+    exit 1
+fi
+shift
+
+project_file="${1:-}"
+if [[ -z "$project_file" ]]; then
+    if [[ -f ./project.tcl ]]; then
+        project_file="./project.tcl"
+    elif [[ -f ./stratus/project.tcl ]]; then
+        project_file="./stratus/project.tcl"
+    else
+        echo "ERROR: no project file found in $(pwd)" >&2
+        exit 1
+    fi
+fi
+
+if [[ ! -f "$project_file" ]]; then
+    echo "ERROR: project file not found: $project_file" >&2
+    exit 1
+fi
+
+project_abs="$(cd "$(dirname "$project_file")" && pwd)/$(basename "$project_file")"
+project_dir="$(dirname "$project_abs")"
+
+# ---- Load module -----------------------------------------------------------
+if ! type module >/dev/null 2>&1; then
+    echo "ERROR: module command not available. Run lambda-diagnose." >&2
+    exit 1
+fi
+
+if ! module load "$STRATUS_MODULE" 2>/dev/null; then
+    echo "ERROR: 'module load $STRATUS_MODULE' failed. Run: module avail stratus" >&2
+    exit 1
+fi
+
+# ---- Run headless ----------------------------------------------------------
+timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+tag="stratus.$(basename "$project_dir").batch.${config}"
+log_file="$LAMBDA_LOGS/${tag}.${timestamp}.log"
+
+echo "Running cynth $config"
+echo "  project: $project_abs"
+echo "  log:     $log_file"
+echo ""
+
+cd "$project_dir"
+# tee captures stdout+stderr; PIPESTATUS preserves Stratus's actual exit code
+set +e
+stratus -batch "$(basename "$project_abs")" \
+        -do "cynth ${config}; exit" 2>&1 | tee "$log_file"
+stratus_rc=${PIPESTATUS[0]}
+set -e
+
+echo ""
+echo "Exit code: $stratus_rc"
+exit "$stratus_rc"

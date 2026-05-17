@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# ============================================================================
+# chamber-diagnose
+# ----------------------------------------------------------------------------
+# Project-agnostic Cadence chamber probe. Reports the health of the runtime
+# environment that any Cadence tool relies on:
+#   - Shell + user identity
+#   - X11 forwarding (DISPLAY, xdpyinfo)
+#   - Modules system
+#   - Cadence tool availability (pre-load AND post-load via `module avail`)
+#   - Storage paths from the chamber reference (/projects, /rscratch, /apps)
+#   - License server reachability ($CDS_LIC_FILE)
+#
+# Run before launching a GUI when something feels off. Never mutates state.
+#
+# Usage: chamber-diagnose
+# ============================================================================
+
+# NOT set -e: we want to report ALL failures, not exit on first.
+set -uo pipefail
+
+# ---- ANSI cosmetic helpers (no-op on non-TTY) ------------------------------
+if [[ -t 1 ]]; then
+    GREEN=$'\e[32m'
+    RED=$'\e[31m'
+    YELLOW=$'\e[33m'
+    BOLD=$'\e[1m'
+    RESET=$'\e[0m'
+else
+    GREEN=""; RED=""; YELLOW=""; BOLD=""; RESET=""
+fi
+
+ok()      { echo "  ${GREEN}[OK]${RESET}    $*"; }
+fail()    { echo "  ${RED}[FAIL]${RESET}  $*"; }
+warn()    { echo "  ${YELLOW}[WARN]${RESET}  $*"; }
+info()    { echo "          $*"; }
+section() { echo ""; echo "${BOLD}=== $1 ===${RESET}"; }
+
+# ---- 1. Shell + user -------------------------------------------------------
+section "Shell + user"
+info "user:     $USER"
+info "shell:    ${SHELL:-unknown}"
+info "hostname: $(hostname)"
+info "pwd:      $(pwd)"
+info "uname:    $(uname -srm)"
+
+# ---- 2. X11 forwarding -----------------------------------------------------
+section "X11 forwarding"
+if [[ -n "${DISPLAY:-}" ]]; then
+    ok "DISPLAY=$DISPLAY"
+else
+    fail "DISPLAY not set; no GUI tool will work"
+    info "Fix: ssh -X (or -Y) into the utility node, then qsh -V"
+fi
+
+if command -v xdpyinfo >/dev/null 2>&1; then
+    if xdpyinfo >/dev/null 2>&1; then
+        ok "xdpyinfo reaches X server"
+    else
+        fail "xdpyinfo cannot reach X server (DISPLAY=$DISPLAY)"
+        info "Try: xclock & (if a clock window appears, X works)"
+    fi
+else
+    warn "xdpyinfo not installed; skipping X-server reachability check"
+fi
+
+# ---- 3. Module system ------------------------------------------------------
+section "Module system"
+if type module >/dev/null 2>&1; then
+    ok "module command available"
+    info "MODULEPATH=${MODULEPATH:-(unset)}"
+    if [[ -n "${LOADEDMODULES:-}" ]]; then
+        info "loaded:   ${LOADEDMODULES//:/, }"
+    else
+        info "loaded:   (none)"
+    fi
+else
+    fail "module command not in this shell"
+    info "Fix: source /etc/profile.d/modules.sh (or equivalent), or login via interactive shell"
+fi
+
+# ---- 4. Cadence tool availability ------------------------------------------
+section "Cadence tools (without loading modules)"
+for tool in stratus_ide stratus xrun genus innovus virtuoso lmstat; do
+    if command -v "$tool" >/dev/null 2>&1; then
+        ok "$tool at $(command -v "$tool")"
+    else
+        warn "$tool not in PATH yet (module not loaded)"
+    fi
+done
+
+# ---- 5. Storage paths ------------------------------------------------------
+section "Storage paths"
+for path in /projects /rscratch /apps/hosted /process/hosted /grid/common/pkgs; do
+    if [[ -d "$path" ]]; then
+        ok "$path exists"
+    else
+        warn "$path missing"
+    fi
+done
+
+if [[ -n "${LAMBDA_SCRATCH:-}" ]]; then
+    if [[ -d "$LAMBDA_SCRATCH" ]]; then
+        local_writable="no"
+        [[ -w "$LAMBDA_SCRATCH" ]] && local_writable="yes"
+        ok "LAMBDA_SCRATCH=$LAMBDA_SCRATCH (writable: $local_writable)"
+    else
+        warn "LAMBDA_SCRATCH=$LAMBDA_SCRATCH does not exist"
+        info "Fix: bash $LAMBDA_ROOT/tools/install.sh"
+    fi
+fi
+
+# ---- 6. License server -----------------------------------------------------
+section "License server"
+if [[ -n "${CDS_LIC_FILE:-}" ]]; then
+    ok "CDS_LIC_FILE=$CDS_LIC_FILE"
+else
+    warn "CDS_LIC_FILE not set (will be set by 'module load <tool>')"
+fi
+
+if command -v lmstat >/dev/null 2>&1 && [[ -n "${CDS_LIC_FILE:-}" ]]; then
+    if lmstat -a -c "$CDS_LIC_FILE" >/dev/null 2>&1; then
+        ok "license server reachable"
+    else
+        fail "lmstat cannot reach license server ($CDS_LIC_FILE)"
+    fi
+else
+    warn "skipping lmstat probe (need lmstat + CDS_LIC_FILE; load a tool module first)"
+fi
+
+# ---- 7. ~/bin -------------------------------------------------------------
+section "User bin"
+if [[ -d "$HOME/bin" ]]; then
+    ok "$HOME/bin exists"
+    if echo "$PATH" | tr ':' '\n' | grep -qx "$HOME/bin"; then
+        ok "$HOME/bin is on \$PATH"
+    else
+        warn "$HOME/bin is NOT on \$PATH"
+        info "Fix (csh):  set path = ( \$HOME/bin \$path )"
+        info "Fix (bash): export PATH=\"\$HOME/bin:\$PATH\""
+    fi
+else
+    warn "$HOME/bin does not exist (will be created by tools/install.sh)"
+fi
+
+echo ""
+echo "${BOLD}Done.${RESET} Review any FAILs above before launching tools."

@@ -19,6 +19,23 @@
 # NOT set -e: we want to report ALL failures, not exit on first.
 set -uo pipefail
 
+# Bootstrap module() in our bash subprocess if MODULESHOME is exported.
+# csh exports MODULESHOME into bash subprocesses, but the `module` function
+# itself is csh-only — bash has to source $MODULESHOME/init/bash to define
+# the bash equivalent. Without this, chamber-diagnose reports a misleading
+# "module command not in this shell" FAIL when actually module loading
+# works correctly from any sibling launcher (lambda-stratus, etc).
+# Also respect LAMBDA_MODULE_INIT override if set.
+if ! type module >/dev/null 2>&1; then
+    if [[ -n "${LAMBDA_MODULE_INIT:-}" ]] && [[ -f "$LAMBDA_MODULE_INIT" ]]; then
+        # shellcheck disable=SC1090
+        source "$LAMBDA_MODULE_INIT" 2>/dev/null || true
+    elif [[ -n "${MODULESHOME:-}" ]] && [[ -f "${MODULESHOME}/init/bash" ]]; then
+        # shellcheck disable=SC1090
+        source "${MODULESHOME}/init/bash" 2>/dev/null || true
+    fi
+fi
+
 # ---- ANSI cosmetic helpers (no-op on non-TTY) ------------------------------
 if [[ -t 1 ]]; then
     GREEN=$'\e[32m'

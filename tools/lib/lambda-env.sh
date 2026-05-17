@@ -65,9 +65,21 @@ fi
 #   export LAMBDA_MODULE_INIT=/the/path/to/init/bash
 if ! type module >/dev/null 2>&1; then
     if [[ -n "${LAMBDA_MODULE_INIT:-}" ]] && [[ -f "$LAMBDA_MODULE_INIT" ]]; then
+        # Per-user override always wins
         # shellcheck disable=SC1090
         source "$LAMBDA_MODULE_INIT"
+    elif [[ -n "${MODULESHOME:-}" ]] && [[ -f "${MODULESHOME}/init/bash" ]]; then
+        # Standard Environment Modules layout: $MODULESHOME/init/<shell>.
+        # MODULESHOME is usually inherited from the parent csh shell (set by
+        # /etc/csh.cshrc or equivalent). This auto-detects any chamber that
+        # exports it. Verified on ae03ut01 (UT/Cadence): MODULESHOME =
+        # /apps/modules-v3.2.6a-64bit/Modules; init/bash works.
+        # shellcheck disable=SC1090
+        source "${MODULESHOME}/init/bash"
     else
+        # Last-resort static fallback list (covers chambers that don't export
+        # MODULESHOME). If none match, set LAMBDA_MODULE_INIT in
+        # ~/.longhorn/lambda.env per the discovery commands in chamber-diagnose.
         for _init in \
             /etc/profile.d/modules.sh \
             /etc/profile.d/lmod.sh \
@@ -76,6 +88,7 @@ if ! type module >/dev/null 2>&1; then
             /usr/share/Modules/init/bash \
             /usr/share/lmod/lmod/init/bash \
             /usr/share/modules/init/bash \
+            /apps/modules-v3.2.6a-64bit/Modules/init/bash \
             /apps/hosted/Modules/init/bash \
             /apps/hosted/modules/init/bash \
             /apps/Modules/default/init/bash \

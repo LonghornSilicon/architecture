@@ -110,4 +110,6 @@ fi
 tag="stratus.${tag_name}.gui"
 
 cd "$project_dir"
-gui_detach "$tag" stratus_ide -prj "$(basename "$project_abs")"
+# stratus_ide flag is -project (not -prj). Confirmed via stratus_ide --help
+# output in 22.01.009: "-project <project>  The name of the project file".
+gui_detach "$tag" stratus_ide -project "$(basename "$project_abs")"

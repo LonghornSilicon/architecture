@@ -50,20 +50,53 @@ fi
 # ---- Bootstrap module() in non-interactive bash ----------------------------
 # Chamber compute nodes run csh interactively; the Modules system is set up
 # at login via shell rc. When we invoke a launcher from a script (or via
-# `qsub`), bashrc is not sourced and `module` is not in scope. Try the
-# standard init paths; ignore failure (lambda-diagnose reports it).
+# `qsub`), bashrc is not sourced and `module` is not in scope. Try common
+# init paths; ignore failure (lambda-diagnose / chamber-diagnose report it).
+#
+# Per-chamber path varies. If none of the fallbacks match this chamber,
+# discover the correct path and set LAMBDA_MODULE_INIT in
+# ~/.longhorn/lambda.env:
+#
+#   bash $ find / -name 'modulecmd' -type f 2>/dev/null | head -3
+#   bash $ find / -name '*.sh' -path '*module*init*' 2>/dev/null | head -3
+#   csh  $ which modulecmd; echo $MODULEPATH
+#
+# Then in ~/.longhorn/lambda.env:
+#   export LAMBDA_MODULE_INIT=/the/path/to/init/bash
 if ! type module >/dev/null 2>&1; then
-    for _init in /etc/profile.d/modules.sh \
-                 /usr/share/Modules/init/bash \
-                 /apps/hosted/Modules/init/bash \
-                 /opt/modules/init/bash; do
-        if [[ -f "$_init" ]]; then
-            # shellcheck disable=SC1090
-            source "$_init"
-            break
-        fi
-    done
-    unset _init
+    if [[ -n "${LAMBDA_MODULE_INIT:-}" ]] && [[ -f "$LAMBDA_MODULE_INIT" ]]; then
+        # shellcheck disable=SC1090
+        source "$LAMBDA_MODULE_INIT"
+    else
+        for _init in \
+            /etc/profile.d/modules.sh \
+            /etc/profile.d/lmod.sh \
+            /etc/profile.d/cadence.sh \
+            /etc/profile.d/cad.sh \
+            /usr/share/Modules/init/bash \
+            /usr/share/lmod/lmod/init/bash \
+            /usr/share/modules/init/bash \
+            /apps/hosted/Modules/init/bash \
+            /apps/hosted/modules/init/bash \
+            /apps/Modules/default/init/bash \
+            /apps/Modules/init/bash \
+            /apps/modules/init/bash \
+            /grid/common/pkgs/Modules/init/bash \
+            /grid/common/pkgs/Modules/default/init/bash \
+            /grid/common/pkgs/lmod/lmod/init/bash \
+            /grid/common/pkgs/modules/init/bash \
+            /opt/modules/init/bash \
+            /opt/Modules/init/bash \
+            /cad/scripts/modules.sh \
+            /cad/Modules/init/bash; do
+            if [[ -f "$_init" ]]; then
+                # shellcheck disable=SC1090
+                source "$_init"
+                break
+            fi
+        done
+        unset _init
+    fi
 fi
 
 # ---- Ensure scratch + logs exist ------------------------------------------

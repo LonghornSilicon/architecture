@@ -76,7 +76,14 @@ if type module >/dev/null 2>&1; then
     fi
 else
     fail "module command not in this shell"
-    info "Fix: source /etc/profile.d/modules.sh (or equivalent), or login via interactive shell"
+    info "Discovery (bash):"
+    info "  find / -name 'modulecmd' -type f 2>/dev/null | head -3"
+    info "  find / -name '*.sh' -path '*module*init*' 2>/dev/null | head -3"
+    info "Discovery (csh, where 'module' works):"
+    info "  which modulecmd"
+    info "  echo \$MODULEPATH"
+    info "Fix: once you know the bash init path, set in ~/.longhorn/lambda.env:"
+    info "  export LAMBDA_MODULE_INIT=/the/path/to/init/bash"
 fi
 
 # ---- 4. Cadence tool availability ------------------------------------------

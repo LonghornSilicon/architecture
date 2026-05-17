@@ -11,7 +11,21 @@
 
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve script through symlinks (~/bin/lambda-diagnose -> tools/bin/lambda-diagnose)
+_src="${BASH_SOURCE[0]}"
+while [[ -L "$_src" ]]; do
+    _dir="$(cd -P "$(dirname "$_src")" && pwd)"
+    _src="$(readlink "$_src")"
+    [[ "$_src" != /* ]] && _src="$_dir/$_src"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
+unset _src _dir
+
+if [[ ! -f "$SCRIPT_DIR/../lib/lambda-env.sh" ]]; then
+    echo "ERROR: $SCRIPT_DIR/../lib/lambda-env.sh not found" >&2
+    echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
+    exit 1
+fi
 # shellcheck source=../lib/lambda-env.sh
 source "$SCRIPT_DIR/../lib/lambda-env.sh"
 

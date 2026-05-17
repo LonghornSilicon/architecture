@@ -112,5 +112,16 @@ if ! type module >/dev/null 2>&1; then
     fi
 fi
 
-# ---- Ensure scratch + logs exist ------------------------------------------
+# ---- Ensure scratch + logs exist; fall back to /tmp if not writable -------
+# /rscratch is node-local on some chambers and /rscratch/<user>/ is sometimes
+# only provisioned on the utility node (not on compute nodes). If we can't
+# write to LAMBDA_SCRATCH, fall back to /tmp/<user>-lambda so logs and
+# transient artifacts still land somewhere. Per-user override is still
+# possible via ~/.longhorn/lambda.env.
 mkdir -p "$LAMBDA_SCRATCH" "$LAMBDA_LOGS" 2>/dev/null || true
+if [[ ! -w "$LAMBDA_SCRATCH" ]] || [[ ! -d "$LAMBDA_SCRATCH" ]]; then
+    LAMBDA_SCRATCH="/tmp/${USER}-lambda"
+    LAMBDA_LOGS="$LAMBDA_SCRATCH/logs"
+    mkdir -p "$LAMBDA_SCRATCH" "$LAMBDA_LOGS" 2>/dev/null
+    export LAMBDA_SCRATCH LAMBDA_LOGS
+fi

@@ -49,13 +49,19 @@ if {[llength $HLS_SOURCES] > 0} {
 # ---- HLS configurations ----------------------------------------------------
 # BASIC:    1 GHz target (arch.yml baseline)
 # FALLBACK: 800 MHz target (arch.yml process.target_clock_mhz fallback)
-define_hls_config BASIC    -DCLOCK_PERIOD=1.0
-define_hls_config FALLBACK -DCLOCK_PERIOD=1.25
+#
+# Note: macro-define flag syntax (e.g. -DCLOCK_PERIOD=1.0) is version-specific
+# in Stratus and requires the actual flag name from the 22.01.009 reference
+# manual. For the stub project, we define configs without macros so the IDE
+# parses cleanly; the macros + per-config flags get added alongside the real
+# HLS source when MatE PE work begins. See arch.yml block matrix_engine.
+define_hls_config BASIC
+define_hls_config FALLBACK
 
 # ---- Simulation configurations ---------------------------------------------
 if {[llength $TB_SOURCES] > 0} {
-    define_sim_config BASIC    $TB_SOURCES -DCLOCK_PERIOD=1.0
-    define_sim_config FALLBACK $TB_SOURCES -DCLOCK_PERIOD=1.25
+    define_sim_config BASIC    $TB_SOURCES
+    define_sim_config FALLBACK $TB_SOURCES
 }
 
 # ---- Project attributes ----------------------------------------------------

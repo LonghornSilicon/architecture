@@ -144,8 +144,17 @@ architecture/
 │   ├── handoff.md                  ← THIS DOCUMENT
 │   ├── literature_audit.md         ← every attention / FFN / KV mechanism with
 │   │                                 go/no-go decision + citations
-│   └── reconciliation_chaithu.md   ← shareable critique of teammate's
-│                                     adaptive-precision-attention work
+│   ├── reconciliation_chaithu.md   ← shareable critique of teammate's
+│   │                                 adaptive-precision-attention work
+│   ├── chamber-sync-setup.md       ← git-bundle sync to Cadence chamber
+│   └── tools-overview.md           ← NEW (2026-05-17): chamber launcher
+│                                     framework convention + lessons learned
+│
+├── tools/                          ← NEW (2026-05-17): chamber-side launchers
+│   ├── install.sh                  ← idempotent: symlinks bin/* into ~/bin/
+│   ├── bin/                        ← lambda-stratus, lambda-diagnose,
+│   │                                 stratus-{gui,batch}, chamber-diagnose
+│   └── lib/                        ← sourced: lambda-env.sh, lambda-detach.sh
 │
 ├── paper/
 │   ├── lambda.tex                  ← IEEEtran conference paper (8 pages)
@@ -160,9 +169,12 @@ architecture/
     ├── isa/                        ← LSU + VecU microcode + CSR map headers
     ├── golden/                     ← Python bit-accurate reference per block
     └── blocks/
-        ├── mate/    vecu/    kce/  ← ACU compute fabric
+        ├── mate/                   ← stratus/project.tcl (stub) committed
+        │   │                         2026-05-17; ready for HLS source
+        │   └── stratus/project.tcl
+        ├── vecu/    kce/           ← ACU compute fabric
         ├── msc/     lsu/           ← memory + control
-        ├── tiu/                    ← NEW: token importance unit
+        ├── tiu/                    ← token importance unit
         └── hif/                    ← PCIe Gen3 x1
 ```
 

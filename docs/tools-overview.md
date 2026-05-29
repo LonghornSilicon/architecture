@@ -95,6 +95,23 @@ After `bash tools/install.sh`, `~/bin/` contains symlinks back into `tools/bin/`
 
 ## Mental models
 
+### Verified Stratus 22.01.009 Tcl syntax
+
+Ground-truth syntax (verified against ESP Columbia `accelerators/stratus_hls/spmv/stratus/project.tcl` + the live `stratus_ide` help on `ae03ut01`):
+
+```tcl
+define_hls_module <module-name> <source-files>
+define_hls_config <module-name> <config-name> --clock_period=<val> [-DMACRO=val ...]
+define_sim_config <sim-config-name> "<module> BEH" -argv "[list <tb-args>]"
+```
+
+Rules nailed down during v0.1 bring-up:
+
+1. **`define_hls_config` requires `<module> <config>`** — module name MUST come first. Calling `define_hls_config BASIC` alone errors with `wrong # args: should be "define_hls_config moduleSpec ccName args"`.
+2. **Clock-period syntax is `--clock_period=<val>`** — double-dash, equals sign, no space.
+3. **Macro defines (`-DMACRO=val`) go after the config name**, never as the config name itself. Calling `define_hls_config BASIC -DCLOCK_PERIOD=1.0` parses `-DCLOCK_PERIOD=1.0` as a second config name and fails because it's not a legal C++ identifier.
+4. **`stratus_ide -project <file>`** is the correct launcher flag (not `-prj`).
+
 ### Stratus HLS — the IDE is a project workspace, not an editor
 
 The single most important thing to internalize: **Stratus IDE does not edit your source files.** It opens a `project.tcl`, reads the file paths listed there, and presents a workspace view of your design (source tree, synthesis-target list, Tcl console, schedule viewer, datapath analyzer). Your actual editing happens in your editor of choice — `gvim`, `emacs`, VS Code Remote-SSH, whatever — on files at `src/blocks/<block>/`.
@@ -243,22 +260,51 @@ Trigger to split: **the second project lands.** At that point, factor `tools/bin
 
 ## Phasing
 
-| Version | Scope | Gates |
+| Version | Scope | Status |
 |---|---|---|
-| **v0.1** (this commit) | `lambda-env.sh`, `lambda-detach.sh`, `stratus-{gui,batch}`, `chamber-diagnose`, `lambda-{stratus,diagnose}`, `install.sh`, stub `src/blocks/mate/stratus/project.tcl` | None. Smoke target: `lambda-stratus mate gui` opens an IDE with the stub. |
-| **v0.2** (when MatE HLS source lands) | `xrun-here`, `lambda-xrun`, license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | MatE HLS C++ source committed. |
-| **v0.5** (when PDK case clears) | `genus-here`, `innovus-here`, `virtuoso-here`, plus `lambda-genus`, `lambda-innovus`, `lambda-virtuoso` | TSMC N16FFC project module available on chamber. |
+| **v0.1** (2026-05-17, commits `c6aa57d` → `7a5034f`) | `lambda-env.sh`, `lambda-detach.sh`, `stratus-{gui,batch}`, `chamber-diagnose`, `lambda-{stratus,diagnose}`, `install.sh`, stub `src/blocks/mate/stratus/project.tcl` | **PASSED.** Smoke test on `ae03ut01` (utility) + compute node 2026-05-17: `lambda-stratus mate gui` opens IDE cleanly on stub project. |
+| **v0.2** (when MatE HLS source lands) | `xrun-here`, `lambda-xrun`, license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | Gated on MatE HLS C++ source committed. |
+| **v0.5** (when PDK case clears) | `genus-here`, `innovus-here`, `virtuoso-here`, plus `lambda-genus`, `lambda-innovus`, `lambda-virtuoso` | Gated on TSMC N16FFC project module available on chamber. |
 
 ---
 
+## Lessons learned from v0.1 chamber bring-up
+
+Eight issues hit during the iterative chamber smoke test. Documented because the next teammate (Richard, Chaithu) or the next chamber will likely hit the same ones, and because the patterns generalize to any project's launcher framework.
+
+| # | Symptom | Root cause | Resolution |
+|---|---|---|---|
+| 1 | `lambda-diagnose: line 37: LAMBDA_ROOT: unbound variable` | `SCRIPT_DIR` resolved to `~/bin/` (the symlink dir) so `$SCRIPT_DIR/../lib/` pointed to `~/lib/` which doesn't exist. Source failure silently propagated to an unbound variable later. | Symlink-chain resolution in each launcher: `while [[ -L "$_src" ]]; do ...; done`. Source errors now fatal with a clear hint. |
+| 2 | `[FAIL] module command not in this shell` from `chamber-diagnose` | `chamber-diagnose` is a bash subprocess; csh's `module` function doesn't propagate across shells. | `chamber-diagnose` also bootstraps `module` via `$MODULESHOME/init/bash` inline. |
+| 3 | Static module-init fallback list didn't match anything | Chamber uses Env Modules v3.2.6a at `/apps/modules-v3.2.6a-64bit/Modules/init/bash`; the version-numbered dir wasn't in my list. | `lambda-env.sh` now prefers `${MODULESHOME}/init/bash` whenever `MODULESHOME` is exported (it is, on every Env-Modules chamber). Static list kept as belt-and-suspenders. |
+| 4 | `/rscratch/$USER/lambda/logs/...: No such file or directory` on compute node | `/rscratch/$USER/` provisioned on utility node but NOT on compute nodes; user can't `mkdir` there. | Two layers of defense: `lambda-env.sh` falls back `LAMBDA_SCRATCH` to `/tmp/<user>-lambda` if `/rscratch` isn't writable; `gui_detach()` also falls back per-log-file. |
+| 5 | `Unknown option -prj` in `stratus_ide` | Wrong flag name. Correct is `-project`, confirmed via help-text inspection. | `stratus-gui` uses `-project` now. |
+| 6 | `define_hls_config: '-DCLOCK_PERIOD=1.0' is not a legal name for an hls_config` | Stratus parses unrecognized args as additional config names, not as macro defines. | Documented canonical syntax: `-DMACRO=val` goes inside the args list AFTER `<module> <config>`, never as a config name. |
+| 7 | `wrong # args: should be "define_hls_config moduleSpec ccName args"` | `define_hls_config` requires module-name as first arg, then config name. Calling with just config name (no module) errors. | Stub `project.tcl` strips all `define_hls_*` commands until real HLS source lands (no source → no module → no config). Verified canonical syntax documented in the stub's comments. |
+| 8 | `file size increased during transfer` from `lftp put` | Benign lftp warning when source file size is racy at SFTP-protocol stat-vs-transfer time. | Ignored — the file is uploaded correctly; subsequent `chmod` succeeds. |
+
 ## Open items and known limitations
 
-| Item | Impact | Resolution path |
+| Item | Status | Resolution path |
 |---|---|---|
-| PDK module `projects/wfddemo/hdsdemo_sky130` is broken | Genus / Innovus can't run end-to-end; Stratus HLS-only works because it doesn't need the tech library | Track via the open Cadence support case in [chamber-sync-setup.md](chamber-sync-setup.md). v0.5 launchers land once a TSMC N16FFC project module is available. |
-| License feature names not yet verified | v0.2 license preflight (e.g., `lmstat ... | grep Stratus_HLS`) is uncertain | Run `lmstat -a -c $CDS_LIC_FILE | head -100` on the chamber once; pin actual feature names in `tools/lib/lambda-license.sh`. |
-| Module init path varies by chamber config | `lambda-env.sh` tries `/etc/profile.d/modules.sh`, `/usr/share/Modules/init/bash`, etc. If none of these match the chamber's actual path, `module load` fails. | First time someone hits this, run `find / -name 'modules*' -path '*/init/*' 2>/dev/null`, add the path to `lambda-env.sh`'s loop. |
-| Only `mate` block has a stub `project.tcl` so far | Other six blocks' READMEs reference `stratus.tcl` (singular) but no file exists | Will be created per-block as HLS work begins. Follow `src/blocks/mate/stratus/project.tcl` pattern. |
+| PDK module `projects/wfddemo/hdsdemo_sky130` is broken | Open | Tracked via the Cadence support case in [chamber-sync-setup.md](chamber-sync-setup.md). v0.5 launchers (`lambda-genus`, `lambda-innovus`) land once a TSMC N16FFC project module is available. |
+| `/rscratch/$USER/` not provisioned on compute nodes | Worked around | Framework falls back to `/tmp/<user>-lambda/`. Worth filing a Cadence support case ("/rscratch/$USER not provisioned on compute nodes — utility node has it, compute doesn't") for proper fix; not blocking. |
+| License feature names not yet verified | Open | Run `lmstat -a -c $CDS_LIC_FILE \| head -100` on the chamber once; pin actual feature names in `tools/lib/lambda-license.sh` when v0.2 license preflight lands. |
+| Module init path varies by chamber | Resolved | `lambda-env.sh` auto-detects via `$MODULESHOME/init/bash`. Per-user override via `LAMBDA_MODULE_INIT` in `~/.longhorn/lambda.env` for non-standard chambers. |
+| Only `mate` block has a stub `project.tcl` so far | Open | Other six blocks' READMEs reference `stratus/project.tcl` (the convention is set). Each block gets its real `project.tcl` when HLS source for that block begins. Follow `src/blocks/mate/stratus/project.tcl` and the canonical syntax under "Verified Stratus 22.01.009 Tcl syntax" above. |
+
+## Verified versions (chamber `ae03ut01`, UT Austin / Cadence)
+
+| Component | Version / path |
+|---|---|
+| OS | RHEL 7 (Linux 3.10.0-693.el7.x86_64) |
+| Login shell | `/bin/csh` |
+| Modules system | Environment Modules v3.2.6a at `/apps/modules-v3.2.6a-64bit/Modules` |
+| `MODULEPATH` | `/home/cm_admin/modules/Linux/modulefiles` |
+| Stratus HLS | `stratus/2201/22.01.009` |
+| Xcelium | `xcelium/2109/21.09.009` |
+| Storage tiers | `/projects` (backed up), `/rscratch` (utility-only, not compute), `/apps/hosted`, `/process/hosted`, `/grid/common/pkgs` |
+| Compute submission | `qsh -q normal.q -now n -V` |
 
 ---
 

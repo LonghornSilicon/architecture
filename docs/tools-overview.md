@@ -287,19 +287,19 @@ For v0.1, Stratus-driven `csim` is enough. `lambda-xrun` and standalone xrun int
 After Stratus emits RTL, the chip-quality flow is:
 
 ```
-src/blocks/<block>/*.cpp           HLS source
+src/blocks/<block>/*.cpp                       HLS source (in git)
         │
         ▼  (lambda-stratus mate batch BASIC)
-build/<block>/stratus/BASIC/...    Stratus-emitted Verilog RTL
+$LAMBDA_WORK/<block>/stratus/<CFG>/<b>.v       Stratus-emitted Verilog RTL
         │
-        ▼  (lambda-genus mate batch — v0.5, gated on PDK case)
-build/<block>/genus/...            Gate-level netlist
+        ▼  (lambda-genus mate batch synth)
+$LAMBDA_WORK/<block>/release/<b>.mapped.v      published by lambda_publish_release
         │
-        ▼  (lambda-innovus mate {init,place,cts,route,signoff})
-build/<block>/innovus/...          DEF/GDS/SDF
+        ▼  (lambda-innovus mate batch route — flow content gated on PDK)
+$LAMBDA_WORK/<block>/release/<b>.routed.{def,v,gds}
 ```
 
-Each step has its own Tcl: `genus/synth.tcl`, `innovus/{init,floorplan,place,cts,route,signoff}.tcl` (the Innovus Foundation Flow convention). The real *flow content* is deferred to v0.5 because it needs a readable PDK — but the **Innovus launcher itself landed in v0.3** and runs today with no design (bring-up, GUI, Tcl sourcing).
+Each step has its own Tcl: `genus/synth.tcl`, `innovus/{init,floorplan,place,cts,route,signoff}.tcl` (the Innovus Foundation Flow convention). The launcher framework + run-area architecture landed in v0.4 (Innovus GUI chamber-confirmed live 2026-06-06 on `ip-10-2-6-68`); the real *flow content* is deferred to v0.5 because it needs a readable PDK. See "Filesystem & run-area architecture" above for why every output path roots at `$LAMBDA_WORK` (= `~/work/lambda`) and goes through `release/` for cross-stage handoff.
 
 ### Verified Innovus 21.18 Stylus Common UI invocation
 
@@ -331,15 +331,18 @@ Confidence ladder (this matters — it's why the launcher is shaped the way it i
 # 1. Get the latest repo on the chamber
 sync-promote
 
-# 2. Install launchers into ~/bin/ and create scratch dir
+# 2. Install launchers into ~/bin/, provision ~/work/lambda/{logs,inputs},
+#    and write the work-root Makefile stub (idempotent — safe to re-run).
 bash ~/architecture/tools/install.sh
 
-# 3. Verify
+# 3. Verify — autofs-aware, node-class-aware probe.
+#    Run from a COMPUTE node (qsh -q normal.q -now n -V); the login node carries
+#    only Virtuoso + vManager and will FAIL most tool probes by design.
 chamber-diagnose
 lambda-diagnose
 ```
 
-If `chamber-diagnose` reports any `[FAIL]`, fix those before launching tools. The most common failure is `$DISPLAY` not set (X11 forwarding broken); fix at the SSH layer with `ssh -X` or `-Y`.
+If `chamber-diagnose` reports any `[FAIL]`, fix those before launching tools. The most common cause on a fresh setup is being on the login node — the probe will explicitly say so. The next most common is `$DISPLAY` unset (X11 forwarding broken) — fix at the SSH layer with `ssh -X` or `-Y`.
 
 ### Daily flow — HLS one block
 

@@ -147,14 +147,25 @@ architecture/
 │   ├── reconciliation_chaithu.md   ← shareable critique of teammate's
 │   │                                 adaptive-precision-attention work
 │   ├── chamber-sync-setup.md       ← git-bundle sync to Cadence chamber
-│   └── tools-overview.md           ← NEW (2026-05-17): chamber launcher
-│                                     framework convention + lessons learned
+│   └── tools-overview.md           ← chamber launcher framework convention
+│                                     + Directory dependencies and log/run
+│                                     dataflow appendix (v0.4.1)
 │
-├── tools/                          ← NEW (2026-05-17): chamber-side launchers
-│   ├── install.sh                  ← idempotent: symlinks bin/* into ~/bin/
-│   ├── bin/                        ← lambda-stratus, lambda-diagnose,
-│   │                                 stratus-{gui,batch}, chamber-diagnose
-│   └── lib/                        ← sourced: lambda-env.sh, lambda-detach.sh
+├── Makefile                        ← root flow wrapper (genus/sim/waves/innovus
+│                                     /hls/...); included by ~/work/lambda/Makefile
+├── tools/                          ← chamber-side launchers (v0.4.1)
+│   ├── install.sh                  ← idempotent: symlinks bin/* into ~/bin/,
+│   │                                 provisions ~/work/lambda/{logs,inputs}
+│   ├── bin/                        ← project: lambda-stratus, lambda-genus,
+│   │                                 lambda-innovus, lambda-xcelium,
+│   │                                 lambda-verisium, lambda-diagnose
+│   │                                 generic: stratus-{gui,batch}, genus-here,
+│   │                                 innovus-here, xrun-here, verisium-here,
+│   │                                 chamber-diagnose
+│   └── lib/                        ← sourced: lambda-env.sh (pins + paths),
+│                                     lambda-run.sh (require_tool / rundir /
+│                                     publish_release / finalize_rundir),
+│                                     lambda-detach.sh (GUI nohup helper)
 │
 ├── paper/
 │   ├── lambda.tex                  ← IEEEtran conference paper (8 pages)
@@ -169,14 +180,17 @@ architecture/
     ├── isa/                        ← LSU + VecU microcode + CSR map headers
     ├── golden/                     ← Python bit-accurate reference per block
     └── blocks/
-        ├── mate/                   ← stratus/project.tcl (stub) committed
-        │   │                         2026-05-17; ready for HLS source
-        │   └── stratus/project.tcl
+        ├── mate/                   ← stub flow files committed; ready for HLS
+        │   ├── stratus/project.tcl ← HLS project (Stratus 22.01 syntax)
+        │   ├── genus/synth.tcl     ← Common-UI synth skeleton (v0.4 stub)
+        │   └── innovus/setup.tcl   ← Stylus Common UI flow stub (v0.3)
         ├── vecu/    kce/           ← ACU compute fabric
         ├── msc/     lsu/           ← memory + control
         ├── tiu/                    ← token importance unit
         └── hif/                    ← PCIe Gen3 x1
 ```
+
+Run output (logs, batch run-ids, release artifacts, MANIFEST) lives **outside** this tree at `~/work/lambda/` (`$LAMBDA_WORK`) so `sync-promote`'s `git reset --hard` can never touch it. See `docs/tools-overview.md` "Filesystem & run-area" and "Directory dependencies and log/run dataflow".
 
 **Canonical sources by question type:**
 

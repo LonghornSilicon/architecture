@@ -30,10 +30,12 @@
 #
 #   set_db init_lib_search_path { <pdk-lib-dir> }
 #   set_db library [list <stdcells>.lib]
-#   # Genus runs from $LAMBDA_WORK/mate/genus/<run-id>/; Stratus output lives
-#   # at $LAMBDA_WORK/mate/stratus/BASIC/mate.v (one level up, sibling stage).
-#   # Read via env so paths are reproducible regardless of CWD.
-#   read_hdl $::env(LAMBDA_WORK)/mate/stratus/BASIC/mate.v
+#   # Read from the release/ contract path — NOT the sibling stratus/<CFG>/ dir.
+#   # lambda-stratus publishes <b>.hls.v to release/ on successful batch (v0.4.1),
+#   # so the path here is config-stable (no BASIC/FALLBACK hardcode) and
+#   # decoupled from the producer's run-id. See docs/tools-overview.md
+#   # "Directory dependencies and log/run dataflow" for the full contract.
+#   read_hdl $::env(LAMBDA_WORK)/mate/release/mate.hls.v
 #   elaborate MatE
 #   read_sdc $::env(LAMBDA_ROOT)/src/blocks/mate/genus/mate.sdc   ;# constraints (in git)
 #   syn_generic

@@ -36,7 +36,7 @@ See [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md) for the
   - `hls.tcl` — HLS configs and cynth invocations (when multi-config exploration needed)
   - `memgen.tcl` — memory generator config (when any RAMs used)
 
-Build output lands under `$LAMBDA_WORK/mate/stratus/<config>/` (= `~/work/lambda/mate/stratus/<config>/` by default — **outside** the git mirror so `sync-promote`'s `git reset --hard` can never touch it; see `docs/tools-overview.md` "Filesystem & run-area").
+Build output lands under `$LAMBDA_WORK/mate/stratus/<run-id>/<config>/` (= `~/work/lambda/mate/stratus/<UTC-runid>/<config>/` by default — v0.4.1 per-invocation isolation; **outside** the git mirror so `sync-promote`'s `git reset --hard` can never touch it). On batch success, Stratus's emitted `<run-id>/<config>/mate.v` is also republished to `$LAMBDA_WORK/mate/release/mate.hls.v` (the cross-stage contract path read by Genus). A STATUS file at `<run-id>/STATUS` records PASS\|FAIL + UTC + rc. See `docs/tools-overview.md` "Filesystem & run-area" and "Directory dependencies and log/run dataflow".
 
 ## Open design questions for the team
 

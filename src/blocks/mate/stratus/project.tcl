@@ -43,18 +43,29 @@ set TOP       MatE
 # Output dir reference (informational; the real CWD redirect lives in the
 # launcher).
 #
-# In v0.4, lambda-stratus / stratus-gui / stratus-batch `cd` into
-# $LAMBDA_WORK/<block>/stratus (or its `interactive/` sub-dir for the IDE)
-# BEFORE launching Stratus. Stratus's default working dirs (bdw_work/,
-# <CFG>/, scverify_work/) land at CWD, so they end up OUTSIDE the git mirror
-# automatically — no Tcl-side redirect needed for the stub.
+# In v0.4 the launcher (lambda-stratus / stratus-gui / stratus-batch) `cd`s
+# into a launcher-controlled run-dir BEFORE launching Stratus, so Stratus's
+# default working dirs (bdw_work/, <CFG>/, scverify_work/) land at CWD and
+# end up OUTSIDE the git mirror automatically — no Tcl-side redirect needed
+# for the stub. v0.4.1 changed which dir that is per mode:
 #
-# BUILD_DIR is computed below from $::env(LAMBDA_BUILD) so that the real
-# define_hls_module / define_hls_config block (commented in the header) can
-# reference it directly when real HLS source lands (e.g. for `set_attr
-# <output_path> $BUILD_DIR`). If the env var is missing — e.g. raw
-# `stratus_ide` invocation outside the launcher — we use an absolute fallback
-# under $HOME/work/lambda so we still write outside the repo.
+#   gui    -> $LAMBDA_WORK/<block>/stratus/interactive/   (stable dir)
+#   batch  -> $LAMBDA_WORK/<block>/stratus/<run-id>/      (per-invocation; was
+#                                                          a shared tool root
+#                                                          in v0.4 — closed
+#                                                          the bdw_work/ race)
+#
+# When real HLS source lands and a flow needs an explicit output path,
+# `[pwd]` (the launcher's run-dir) is the right hook. The launcher also
+# exports $::env(STRATUS_RUNDIR) pointing at the same path if you'd rather
+# reference it explicitly than rely on CWD.
+#
+# BUILD_DIR below is computed from $::env(LAMBDA_BUILD) as a TOOL-ROOT
+# pointer (not the per-runid dir) — informational only for the stub. If you
+# wire a real flow that needs the per-run-id dir, prefer $::env(STRATUS_RUNDIR)
+# or [pwd] instead. If LAMBDA_BUILD is missing — e.g. raw `stratus_ide`
+# invocation outside the launcher — we fall back to an absolute path under
+# $HOME/work/lambda so we still write outside the repo.
 if {[info exists ::env(LAMBDA_BUILD)]} {
     set BUILD_DIR "$::env(LAMBDA_BUILD)/$BLOCK/stratus"
 } else {

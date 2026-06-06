@@ -94,9 +94,9 @@ case "$subcmd" in
             echo "Hint:  lambda-stratus $block diagnose" >&2
             exit 1
         fi
-        # v0.4: tell the generic launcher to cd into the work area, not the
-        # in-repo project dir. Without this Stratus would write bdw_work/,
-        # <CFG>/, scverify_work/ alongside project.tcl (inside git mirror).
+        # GUI sessions live in the stable `interactive/` dir (no STATUS marker —
+        # GUI has no defined exit-success semantics, same convention as Innovus
+        # GUI and Genus GUI). Detached via stratus-gui, so exec is correct here.
         STRATUS_RUNDIR="$(lambda_rundir "$block" stratus gui)" || exit 1
         export STRATUS_RUNDIR
         exec "$SCRIPT_DIR/stratus-gui" "$project_file"
@@ -112,14 +112,31 @@ case "$subcmd" in
             echo "ERROR: $project_file not found" >&2
             exit 1
         fi
-        # v0.4: per-CFG run dir under $LAMBDA_WORK. Stratus's `cynth <CFG>`
-        # creates its <CFG>/ subdir under CWD — by placing CWD at the per-block
-        # stratus root, the per-CFG subdirs nest naturally (preserves the v0.1
-        # `~/work/lambda/<block>/stratus/<CFG>/` layout, outside the repo).
-        STRATUS_RUNDIR="$LAMBDA_WORK/$block/stratus"
-        mkdir -p "$STRATUS_RUNDIR" 2>/dev/null
+        # v0.4.1: per-invocation <run-id>/ dir, matching Genus/Innovus/Xcelium.
+        # Stratus's `cynth <CFG>` creates <CFG>/, bdw_work/, scverify_work/
+        # under CWD — those now nest as <run-id>/<CFG>/, <run-id>/bdw_work/,
+        # etc. Closes the v0.4 race where concurrent `cynth BASIC` and
+        # `cynth FALLBACK` from two shells collided on bdw_work/.
+        STRATUS_RUNDIR="$(lambda_rundir "$block" stratus batch)" || exit 1
+        run_id="$(basename "$STRATUS_RUNDIR")"
         export STRATUS_RUNDIR
-        exec "$SCRIPT_DIR/stratus-batch" "$config" "$project_file"
+        # Capture rc instead of exec — needed for publish + finalize below.
+        # `|| rc=$?` under set -euo: same idiom as lambda-genus / lambda-innovus.
+        rc=0
+        "$SCRIPT_DIR/stratus-batch" "$config" "$project_file" || rc=$?
+        # v0.4.1: publish Stratus-emitted Verilog to release/ so Genus reads from
+        # the contract path, not a sibling-tool hardcoded location. Soft-fail:
+        # the stub project emits no .v today, so absence is expected during
+        # bring-up. When real HLS source lands, this becomes the load-bearing
+        # Stratus → Genus edge of the cross-stage release contract.
+        if [[ $rc -eq 0 ]]; then
+            hls_out="$STRATUS_RUNDIR/$config/${block}.v"
+            if [[ -f "$hls_out" ]]; then
+                lambda_publish_release "$block" "$hls_out" "${block}.hls.v" stratus "$run_id" || true
+            fi
+        fi
+        lambda_finalize_rundir "$STRATUS_RUNDIR" "$rc"
+        exit "$rc"
         ;;
 
     clean)

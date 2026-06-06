@@ -29,10 +29,18 @@
 : "${STRATUS_MODULE:=stratus/2201/${STRATUS_VERSION}}"
 : "${XCELIUM_VERSION:=21.09.009}"
 : "${XCELIUM_MODULE:=xcelium/2109/${XCELIUM_VERSION}}"
-: "${GENUS_MODULE:=}"        # set when known + PDK case clears
-: "${INNOVUS_MODULE:=}"      # set when known + PDK case clears
-: "${VIRTUOSO_MODULE:=}"     # set when known
-: "${LAMBDA_PDK_MODULE:=}"   # e.g., projects/<pdk>/<sub> — pending support case
+# Module roots below are the NEWEST observed on the chamber modulefiles tree
+# (/home/cm_admin/modules/Linux/modulefiles/, enumerated over SFTP 2026-06-06).
+# They pin the TOOL versions and are independent of PDK availability: the tools
+# load fine, but no TSMC N16FFC PDK is on the chamber yet (only gpdk + skywater
+# under /process/hosted), so real signoff against the real process is still
+# gated by LAMBDA_PDK_MODULE.
+: "${GENUS_MODULE:=genus/211}"     # observed: genus/{172,181,191,201,211}
+: "${INNOVUS_MODULE:=innovus/251}" # observed: innovus/{171,181,191,201,211,251} (25.1)
+: "${PEGASUS_MODULE:=pegasus/251}" # observed: pegasus/{204..251} — DRC/LVS signoff
+: "${SSV_MODULE:=ssv/251}"         # observed: ssv/{172..251} — Tempus/Voltus/Quantus
+: "${VIRTUOSO_MODULE:=}"           # ic/icadv/icadvm present; pin when needed
+: "${LAMBDA_PDK_MODULE:=}"         # no TSMC N16FFC on chamber — pending PDK delivery
 
 # ---- Lambda block list (canonical) ----------------------------------------
 # Source of truth for which block names lambda-* launchers accept.

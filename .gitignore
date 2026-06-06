@@ -36,6 +36,16 @@ xmsim.key
 # Stratus IDE per-user state (lives next to project.tcl; don't commit)
 .stratus/
 *.stratus-prj/
+# Innovus / Genus / Tempus run artifacts (normally under build/, but defensive
+# in case a tool is launched from elsewhere)
+*.cmd
+*.cmd.gz
+*.logv
+*.logv.gz
+.cadence/
+*.dat
+timingReports/
+mmmc*/
 
 # Secrets / runner-local config (NEVER commit)
 .env

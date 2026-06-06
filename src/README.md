@@ -46,6 +46,7 @@ Every block in `blocks/<block>/` has a corresponding Python reference at `golden
 - [x] Block scaffolding created — MatE, VecU, KCE, MSC, LSU, HIF, TIU (2026-05-14)
 - [x] Chamber tooling framework v0.1 — `tools/bin/lambda-stratus` + generic helpers + installer; smoke-tested end-to-end on `ae03ut01` 2026-05-17. See [`../docs/tools-overview.md`](../docs/tools-overview.md).
 - [x] Stub `src/blocks/mate/stratus/project.tcl` — IDE opens cleanly; documents canonical Stratus 22.01 Tcl syntax for when source lands (2026-05-17)
+- [x] Chamber tooling v0.3 — `tools/bin/lambda-innovus` + `innovus-here` (Innovus Stylus Common UI) + root `Makefile` flow wrapper + stub `src/blocks/mate/innovus/setup.tcl`; tool module pins set from the observed chamber tree (2026-06-06). **Authored off-chamber; first ETX run is its smoke test.** See [`../docs/tools-overview.md`](../docs/tools-overview.md).
 - [ ] MatE PE microarchitecture HLS source — *next* (after Phases A/B/C/D complete per plan)
 - [ ] KCE-mini Hadamard + codebook HLS source
 - [ ] VecU SIMD lane HLS source
@@ -53,7 +54,7 @@ Every block in `blocks/<block>/` has a corresponding Python reference at `golden
 - [ ] Python golden for MatE, KCE, VecU, TIU, MSC, LSU
 - [ ] Block-level testbenches
 - [ ] Full-chip integration in Stratus
-- [ ] Cadence Genus synthesis pass (gated on PDK module support case)
-- [ ] Cadence Innovus PnR pass (gated on PDK module support case)
+- [ ] Cadence Genus synthesis pass (tool present `genus/211`; gated on RTL + readable PDK)
+- [ ] Cadence Innovus PnR pass (launcher landed v0.3; real flow gated on RTL + PDK — no TSMC N16FFC on chamber yet, `advgpdk` available for bring-up)
 
 Per the approved plan, HLS work begins only after the research dives (Phases A/B/C — Chaithu reconciliation, attention/FFN literature audit, Etched patent analysis) complete. Tracked in detail in `../STATUS.md` §6 and the plan file at `~/.claude/plans/proud-yawning-hopcroft.md`.

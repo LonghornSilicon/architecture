@@ -21,6 +21,16 @@ lambda-stratus mate gui                            # open IDE on MatE
 lambda-stratus mate batch BASIC                    # headless cynth BASIC
 lambda-stratus mate diagnose                       # what's wrong?
 chamber-diagnose                                   # what's wrong with the chamber itself?
+
+# Back-end (Innovus, Stylus Common UI) — v0.3, 2026-06-06
+lambda-innovus mate gui                            # Innovus + GUI (no design needed)
+lambda-innovus mate shell                          # Innovus text REPL; then `gui_show`
+lambda-innovus mate batch setup                    # headless: source the flow stub
+
+# Make wrapper (ergonomic layer over the launchers; run from ETX on the chamber)
+make innovus BLOCK=mate                            # == lambda-innovus mate gui
+make hls     BLOCK=mate CFG=BASIC                  # == lambda-stratus mate batch BASIC
+make diag                                          # == lambda-diagnose
 ```
 
 That's the whole interface. Everything below is justification, mental models, and extrapolation paths.
@@ -151,7 +161,27 @@ build/<block>/genus/...            Gate-level netlist
 build/<block>/innovus/...          DEF/GDS/SDF
 ```
 
-Each step has its own Tcl: `genus/synth.tcl`, `innovus/{init,floorplan,place,cts,route,signoff}.tcl` (the Innovus Foundation Flow convention). These are deferred to v0.5 because they need the PDK module that is currently broken per [chamber-sync-setup.md](chamber-sync-setup.md) open items.
+Each step has its own Tcl: `genus/synth.tcl`, `innovus/{init,floorplan,place,cts,route,signoff}.tcl` (the Innovus Foundation Flow convention). The real *flow content* is deferred to v0.5 because it needs a readable PDK — but the **Innovus launcher itself landed in v0.3** and runs today with no design (bring-up, GUI, Tcl sourcing).
+
+### Verified Innovus 25.1 Stylus Common UI invocation
+
+Ground truth for `innovus/251` (= 25.1; chamber has `innovus/{171..251}`), verified against the *Innovus Stylus Common UI User Guide v25.10* + *Stylus Text Command Reference* (web, 2026-06-06). The `lambda-innovus` / `innovus-here` launchers bake these in:
+
+```
+innovus -stylus                 # enable Stylus Common UI (interactive REPL + GUI)
+innovus -stylus -no_gui         # text REPL, no GUI
+innovus -stylus -no_gui -files <flow.tcl> -log <log>   # headless batch
+gui_show  /  gui_hide           # show/hide GUI in Common UI (legacy UI used `win`)
+```
+
+Confidence ladder (this matters — it's why the launcher is shaped the way it is):
+
+1. **High / verified:** `-stylus`, `-no_gui`, `-log`, `gui_show`. The `gui` and `shell` subcommands use *only* these, so they cannot fail on unverified syntax.
+2. **Medium / best-confirmed-not-tested:** `-files` as the Common UI script-source flag. Used *only* by the `batch` subcommand. **Fallback if a `batch` run rejects `-files` on 25.1:** `lambda-innovus <block> shell`, then `source <flow.tcl>` at the prompt, and pin the correct flag in `innovus-here`.
+
+**`innovus` is a console REPL, not a pure GUI app** (the key difference from `stratus_ide`). So `lambda-innovus` runs Innovus in the **foreground**, inheriting your ETX terminal — it does NOT `gui_detach`/`nohup` it the way `stratus-gui` does, because that would leave no prompt to type `gui_show` into.
+
+**PDK reality (load-bearing):** there is **no TSMC N16FFC PDK on the chamber** — `/process/hosted` has only `gpdk` (incl. `advgpdk` = `cds_ff_mpt`, the only FinFET-class vehicle) and `skywater`. So a real `init_design` against the target process is blocked on PDK *delivery* (admin-gated via `/process/hosted/xfer/incoming/`, TSMC University FinFET NDA), not on a "broken module." A flow against `advgpdk` is the de-risking path available *now*. See [chamber-sync-setup.md](chamber-sync-setup.md) and the chamber scope in `STATUS.md`.
 
 ---
 
@@ -263,8 +293,9 @@ Trigger to split: **the second project lands.** At that point, factor `tools/bin
 | Version | Scope | Status |
 |---|---|---|
 | **v0.1** (2026-05-17, commits `c6aa57d` → `7a5034f`) | `lambda-env.sh`, `lambda-detach.sh`, `stratus-{gui,batch}`, `chamber-diagnose`, `lambda-{stratus,diagnose}`, `install.sh`, stub `src/blocks/mate/stratus/project.tcl` | **PASSED.** Smoke test on `ae03ut01` (utility) + compute node 2026-05-17: `lambda-stratus mate gui` opens IDE cleanly on stub project. |
+| **v0.3** (2026-06-06) | `innovus-here` + `lambda-innovus` (Stylus Common UI: `gui`/`shell`/`batch`/`diagnose`/`clean`), root `Makefile` flow wrapper, stub `src/blocks/mate/innovus/setup.tcl`, `INNOVUS_MODULE`/`GENUS_MODULE`/`PEGASUS_MODULE`/`SSV_MODULE` pinned from observed chamber modulefiles | **AUTHORED, NOT YET CHAMBER-TESTED.** Unlike v0.1, this was written off-chamber (the repo-sync SFTP channel is read/exec-blocked). The first ETX run is the smoke test. `gui`/`shell` use only verified flags (`-stylus`, `-no_gui`, `-log`); `batch`'s `-files` is the one unverified flag — fallback documented in `innovus-here`. |
 | **v0.2** (when MatE HLS source lands) | `xrun-here`, `lambda-xrun`, license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | Gated on MatE HLS C++ source committed. |
-| **v0.5** (when PDK case clears) | `genus-here`, `innovus-here`, `virtuoso-here`, plus `lambda-genus`, `lambda-innovus`, `lambda-virtuoso` | Gated on TSMC N16FFC project module available on chamber. |
+| **v0.5** (when a real PDK is readable from ETX) | `genus-here`/`lambda-genus`, `lambda-pegasus` (DRC/LVS), `lambda-tempus` (STA via SSV), `virtuoso-here`; a real `init_design`→`route`→`signoff` flow replacing the `setup.tcl` stub | **Gated on PDK, not on tools.** The tools (`genus/211`, `innovus/251`, `pegasus/251`, `ssv/251`) are all present on the chamber. What's missing is the PDK: `/process/hosted` has only `gpdk` + `skywater` — **no TSMC N16FFC**. `advgpdk` (the installed `cds_ff_mpt`) is the only FinFET-class vehicle and is usable for flow bring-up; the real-process flow waits on PDK delivery via `/process/hosted/xfer/incoming/` (admin-gated, TSMC University FinFET NDA). |
 
 ---
 
@@ -320,5 +351,9 @@ Eight issues hit during the iterative chamber smoke test. Documented because the
 | `tools/bin/chamber-diagnose` | generic probe | ~120 | Shell, X11, module system, tool availability, storage paths, license server, `~/bin/` PATH check. Read-only. |
 | `tools/bin/lambda-stratus` | project wrapper | ~140 | Resolves `<block>` to its `stratus/project.tcl`; delegates to `stratus-gui` / `stratus-batch`. Adds `clean`, `report`, `diagnose` subcommands. |
 | `tools/bin/lambda-diagnose` | project probe | ~70 | Runs `chamber-diagnose` then adds Lambda-specific checks: LAMBDA_ROOT, git HEAD, per-block project.tcl presence. |
+| `tools/bin/innovus-here` | generic launcher | ~150 | **v0.3.** Foreground Innovus (Stylus) launcher: `gui`/`shell`/`batch` modes. Verified-flags-only on interactive paths; `-files` quarantined to batch. |
+| `tools/bin/lambda-innovus` | project wrapper | ~170 | **v0.3.** Resolves `<block>` to `build/<block>/innovus/` run dir + `src/blocks/<block>/innovus/` flow dir; delegates to `innovus-here`. `gui`/`shell`/`batch`/`clean`/`diagnose`. |
+| `Makefile` (repo root) | flow wrapper | ~120 | **v0.3.** Ergonomic + dependency-DAG layer over the launchers. `make {gui,hls,innovus,innovus-shell,diag,...} BLOCK=<b>`. Thin: delegates to bash launchers, does not reimplement chamber resilience. |
+| `src/blocks/mate/innovus/setup.tcl` | flow stub | ~70 | **v0.3.** Stub Stylus flow: documents the Foundation-flow skeleton; live body is pure-core Tcl (no unverified Cadence commands). Exits in batch via `INNOVUS_BATCH`. |
 
-Total: ~660 lines across 8 files. Small, auditable, version-controlled.
+Total: ~1170 lines across 13 files. Small, auditable, version-controlled.

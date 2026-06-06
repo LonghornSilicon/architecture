@@ -129,6 +129,7 @@ case "$subcmd" in
                 lambda_publish_release "$block" "$mapped" "${block}.mapped.v" genus "$run_id" || true
             fi
         fi
+        lambda_finalize_rundir "$run_dir" "$rc"
         exit $rc
         ;;
     clean)

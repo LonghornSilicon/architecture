@@ -89,11 +89,18 @@ case "$subcmd" in
     sim)
         shift 2
         run_dir="$(lambda_rundir "$block" xcelium batch)" || exit 1
-        exec "$SCRIPT_DIR/xrun-here" sim "$run_dir" "$@"
+        # v0.4.1: capture rc + finalize STATUS marker. Cannot exec here without
+        # losing the rc. xrun's exit code propagates through cleanly.
+        rc=0
+        "$SCRIPT_DIR/xrun-here" sim "$run_dir" "$@" || rc=$?
+        lambda_finalize_rundir "$run_dir" "$rc"
+        exit "$rc"
         ;;
     gui)
         shift 2
         run_dir="$(lambda_rundir "$block" xcelium gui)" || exit 1
+        # GUI sessions land in interactive/, no STATUS marker (no defined
+        # exit-success semantics), parallel to Stratus/Genus/Innovus gui.
         exec "$SCRIPT_DIR/xrun-here" gui "$run_dir" "$@"
         ;;
     batch)
@@ -113,7 +120,10 @@ case "$subcmd" in
             exit 1
         fi
         run_dir="$(lambda_rundir "$block" xcelium batch)" || exit 1
-        exec "$SCRIPT_DIR/xrun-here" batch "$run_dir" "$af"
+        rc=0
+        "$SCRIPT_DIR/xrun-here" batch "$run_dir" "$af" || rc=$?
+        lambda_finalize_rundir "$run_dir" "$rc"
+        exit "$rc"
         ;;
     waves)
         latest="$tool_root/latest"

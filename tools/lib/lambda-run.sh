@@ -175,3 +175,31 @@ lambda_publish_release() {
 
     echo "Published: $dst_path"
 }
+
+# ---- lambda_finalize_rundir -----------------------------------------------
+# Usage: lambda_finalize_rundir <run-dir> <exit-code>
+# Writes <run-dir>/STATUS in a fixed parseable format:
+#     PASS  <UTC-ISO>  rc=0
+#     FAIL  <UTC-ISO>  rc=<n>
+# Best-effort: never fails the run if the write doesn't succeed (caller already
+# has the real exit code; STATUS is observability, not control flow). Always
+# returns 0.
+#
+# Why STATUS is separate from `latest`:
+#   - `latest` symlink = most-recent *invocation* (verisium needs this to open
+#     a crashed run's waves.shm for debugging).
+#   - `STATUS` file    = pass/fail of THAT invocation.
+#   - `release/MANIFEST` = which run produced the current published artifact.
+# Three orthogonal signals; downstream code can answer any of the three
+# questions without reading the tool log.
+lambda_finalize_rundir() {
+    local run_dir="${1:?lambda_finalize_rundir: missing run-dir}"
+    local rc="${2:?lambda_finalize_rundir: missing exit-code}"
+    [[ -d "$run_dir" ]] || return 0
+
+    local utc verdict
+    utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    if [[ "$rc" == "0" ]]; then verdict="PASS"; else verdict="FAIL"; fi
+    printf '%s  %s  rc=%s\n' "$verdict" "$utc" "$rc" > "$run_dir/STATUS" 2>/dev/null || true
+    return 0
+}

@@ -40,10 +40,28 @@
 set BLOCK     mate
 set TOP       MatE
 
-# Output dir: tools/lib/lambda-env.sh sets LAMBDA_BUILD=<repo>/build, but
-# Stratus runs from src/blocks/mate/stratus/, so this is relative.
-# Equivalent absolute path: $LAMBDA_BUILD/$BLOCK/stratus/
-set BUILD_DIR ../../../../build/$BLOCK/stratus
+# Output dir reference (informational; the real CWD redirect lives in the
+# launcher).
+#
+# In v0.4, lambda-stratus / stratus-gui / stratus-batch `cd` into
+# $LAMBDA_WORK/<block>/stratus (or its `interactive/` sub-dir for the IDE)
+# BEFORE launching Stratus. Stratus's default working dirs (bdw_work/,
+# <CFG>/, scverify_work/) land at CWD, so they end up OUTSIDE the git mirror
+# automatically — no Tcl-side redirect needed for the stub.
+#
+# BUILD_DIR is computed below from $::env(LAMBDA_BUILD) so that the real
+# define_hls_module / define_hls_config block (commented in the header) can
+# reference it directly when real HLS source lands (e.g. for `set_attr
+# <output_path> $BUILD_DIR`). If the env var is missing — e.g. raw
+# `stratus_ide` invocation outside the launcher — we use an absolute fallback
+# under $HOME/work/lambda so we still write outside the repo.
+if {[info exists ::env(LAMBDA_BUILD)]} {
+    set BUILD_DIR "$::env(LAMBDA_BUILD)/$BLOCK/stratus"
+} else {
+    set BUILD_DIR "$::env(HOME)/work/lambda/$BLOCK/stratus"
+    puts "WARN: LAMBDA_BUILD not in env; using absolute fallback $BUILD_DIR"
+    puts "     (run via lambda-stratus / make for env-honored configuration)"
+}
 
 # ---- Stub: no Stratus commands until HLS source lands ----------------------
 # When pe.cpp / mate.cpp / tb/ are written, uncomment the define_hls_module +

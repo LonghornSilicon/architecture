@@ -49,10 +49,12 @@
 #   write_def       mate.routed.def
 #   # -> Pegasus DRC/LVS (lambda-pegasus, v0.5), Tempus/SSV STA, Quantus RC
 #
-# Notes (verified against Innovus Stylus Common UI User Guide v25.10; chamber
-# runs innovus/251 = 25.1):
+# Notes (verified against Innovus Stylus Common UI User Guide + Stylus Text
+# Command Reference; chamber pins innovus/211/21.18.000 for matched DB family
+# with genus/211/21.18.000 — see docs/tools-overview.md "Chamber execution model"):
 #   - GUI control is `gui_show` / `gui_hide` (legacy UI used `win`).
-#   - All artifacts land in this run dir (build/mate/innovus/, gitignored).
+#   - All artifacts land in this run dir under $LAMBDA_WORK/mate/innovus/<run-id>,
+#     gitignored (lives in ~/work/lambda, NOT in the repo mirror).
 # ============================================================================
 
 puts ""

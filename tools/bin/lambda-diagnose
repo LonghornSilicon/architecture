@@ -80,13 +80,19 @@ for block in "${LAMBDA_BLOCKS[@]}"; do
     fi
 done
 
-section "Build output dir"
-if [[ -d "$LAMBDA_BUILD" ]]; then
-    size=$(du -sh "$LAMBDA_BUILD" 2>/dev/null | cut -f1)
-    ok "LAMBDA_BUILD=$LAMBDA_BUILD ($size)"
+section "Run / work area"
+# LAMBDA_WORK is the canonical run area (home-backed, cross-node, NOT in git).
+# LAMBDA_BUILD is an alias of it for back-compat with v0.1-v0.3 launchers.
+if [[ -d "$LAMBDA_WORK" ]]; then
+    size=$(du -sh "$LAMBDA_WORK" 2>/dev/null | cut -f1)
+    ok "LAMBDA_WORK=$LAMBDA_WORK ($size)"
 else
-    info "LAMBDA_BUILD=$LAMBDA_BUILD (empty; will be created by first batch run)"
+    info "LAMBDA_WORK=$LAMBDA_WORK (empty; will be created by first batch run)"
+    info "Fix: bash $LAMBDA_ROOT/tools/install.sh  (provisions ~/work/lambda)"
 fi
+info "LAMBDA_BUILD=$LAMBDA_BUILD  (alias of LAMBDA_WORK)"
+info "LAMBDA_LOGS=$LAMBDA_LOGS"
+[[ -n "${LAMBDA_FAST:-}" ]] && info "LAMBDA_FAST=$LAMBDA_FAST  (ephemeral fallback)"
 
 echo ""
 echo "${BOLD}Done.${RESET} Lambda environment ready for: lambda-stratus <block> {gui|batch <config>}"

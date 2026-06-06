@@ -54,7 +54,7 @@ The repo was restructured to single-arch focus on 2026-05-14. Earlier history (L
 - **Process:** TSMC N16FFC at 28.2 MTr/mm² logic, 1.25 MB/mm² HD SRAM, 0.8 V core, 1 GHz target (800 MHz fallback)
 - **Shuttle:** IMEC / Europractice mini@sic 2.0 (primary, ~$60-100K) or Muse Semiconductor (US fallback, ~$75K) — both route to the TSMC University FinFET program
 - **Die:** 4 mm² (2 × 2 mm) — the IMEC / Muse mini@sic minimum Full Block at TSMC 16nm
-- **EDA:** Cadence flow throughout — Stratus HLS for C++ → RTL, Genus for synthesis, Innovus for PnR, Calibre for DRC/LVS, PrimeTime for STA signoff. Tool access bundled with IMEC mini@sic registration.
+- **EDA:** Cadence flow throughout — Stratus HLS for C++ → RTL, Genus for synthesis, Innovus (Stylus Common UI) for PnR, **Pegasus for DRC/LVS, Tempus/SSV for STA signoff** (Quantus for extraction, Voltus for power) — all Cadence, matching the shared hosted chamber's tool set; **Verisium Debug** with SimVision as fallback for waveform debug. Tool access bundled with the chamber engagement (see `docs/tools-overview.md` "Chamber execution model").
 - **Off-chip DRAM:** 1× LPDDR5X-8533 x16 (12 GB/s sustained, 4–8 GB capacity) — Synopsys DesignWare or Cadence Denali PHY. **LPDDR4X x16 (Cadence) is the documented fallback** if LPDDR5X PHY quote returns over budget; see `STATUS.md` §5.
 - **Host interface:** PCIe Gen3 x1 (~1 GB/s sustained) on **M.2 2280 form factor**. On-die PHY drives x1; M.2 slot wires 4 lanes (negotiated down). Synopsys DesignWare PCIe Gen3 x1 or Cadence PCIe Gen3 PHY — both with public 16nm datasheets.
 - **Tape-out target:** Q1 2028; demo Q3 2028; paper submission DAC/ICCAD/MICRO/HotChips 2028-09

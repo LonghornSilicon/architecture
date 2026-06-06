@@ -13,34 +13,52 @@
 # ============================================================================
 
 # ---- Project paths ---------------------------------------------------------
+# Three storage classes; see docs/tools-overview.md "Filesystem & run-area".
+#   LAMBDA_ROOT     ~/architecture  — source/methodology, git mirror (read-only).
+#                                     `sync-promote` does `git reset --hard`, so
+#                                     NO tool output should land here.
+#   LAMBDA_WORK     ~/work/lambda   — run/work area, home-backed (NFS, cross-node).
+#                                     The only reliable persistent writable space:
+#                                     /rscratch/$USER is unprovisioned; /projects
+#                                     has no group dir; /tmp is node-local/ephemeral.
+#   LAMBDA_FAST     /tmp/$USER-lambda — node-local ephemeral; for huge transients
+#                                     when LAMBDA_WORK is tight (wiped on reboot).
 : "${LAMBDA_ROOT:=$HOME/architecture}"
-: "${LAMBDA_SCRATCH:=/rscratch/$USER/lambda}"
-: "${LAMBDA_LOGS:=$LAMBDA_SCRATCH/logs}"
-: "${LAMBDA_BUILD:=$LAMBDA_ROOT/build}"
+: "${CHAMBER_WORK:=$HOME/work}"
+: "${LAMBDA_WORK:=$CHAMBER_WORK/lambda}"
+: "${LAMBDA_LOGS:=$LAMBDA_WORK/logs}"
+: "${LAMBDA_FAST:=/tmp/${USER}-lambda}"
+# Back-compat alias: every existing $LAMBDA_BUILD/... reference in launchers
+# (lambda-stratus, lambda-innovus, lambda-diagnose) follows LAMBDA_WORK with no
+# per-file edits. NB: src/blocks/<b>/stratus/project.tcl reads this from the env
+# explicitly (Tcl can't see bash defaults) — see that file for the contract.
+: "${LAMBDA_BUILD:=$LAMBDA_WORK}"
+# Back-compat alias: LAMBDA_SCRATCH was the v0.1-v0.3 name; some launcher logs
+# and chamber-diagnose strings still reference it. Aliased to LAMBDA_WORK so any
+# straggler "$LAMBDA_SCRATCH/..." path resolves correctly during the migration.
+: "${LAMBDA_SCRATCH:=$LAMBDA_WORK}"
 
 # ---- Chamber SGE queue -----------------------------------------------------
 : "${LAMBDA_QUEUE:=normal.q}"
 
 # ---- Cadence tool module pins ---------------------------------------------
-# These pin to the versions documented in docs/chamber-sync-setup.md /
-# the chamber command reference. Override per-user in ~/.longhorn/lambda.env
-# if you need a different one. lambda-diagnose verifies availability.
-: "${STRATUS_VERSION:=22.01.009}"
-: "${STRATUS_MODULE:=stratus/2201/${STRATUS_VERSION}}"
-: "${XCELIUM_VERSION:=21.09.009}"
-: "${XCELIUM_MODULE:=xcelium/2109/${XCELIUM_VERSION}}"
-# Module roots below are the NEWEST observed on the chamber modulefiles tree
-# (/home/cm_admin/modules/Linux/modulefiles/, enumerated over SFTP 2026-06-06).
-# They pin the TOOL versions and are independent of PDK availability: the tools
-# load fine, but no TSMC N16FFC PDK is on the chamber yet (only gpdk + skywater
-# under /process/hosted), so real signoff against the real process is still
-# gated by LAMBDA_PDK_MODULE.
-: "${GENUS_MODULE:=genus/211}"     # observed: genus/{172,181,191,201,211}
-: "${INNOVUS_MODULE:=innovus/251}" # observed: innovus/{171,181,191,201,211,251} (25.1)
-: "${PEGASUS_MODULE:=pegasus/251}" # observed: pegasus/{204..251} — DRC/LVS signoff
-: "${SSV_MODULE:=ssv/251}"         # observed: ssv/{172..251} — Tempus/Voltus/Quantus
-: "${VIRTUOSO_MODULE:=}"           # ic/icadv/icadvm present; pin when needed
-: "${LAMBDA_PDK_MODULE:=}"         # no TSMC N16FFC on chamber — pending PDK delivery
+# Three-level leaves matching the INSTALLED versions per the 2026-06-06 debug
+# session on compute node ip-10-2-6-68. Two-level specs (e.g. innovus/251) are
+# valid — Environment Modules resolves to the default leaf — but pinning the
+# leaf gives (a) reproducibility against silent default drift, and (b) MATCHED
+# RELEASE FAMILY across Genus+Innovus, which share database format within a
+# family. Newest installed Genus is 21.18.000; Innovus must match (innovus/251
+# default = 25.14 → cross-version handoff, supported but ugly).
+# Override per-user in ~/.longhorn/lambda.env. lambda-diagnose verifies.
+: "${STRATUS_MODULE:=stratus/2201/22.01.009}"            # matches /apps/STRATUS2201
+: "${XCELIUM_MODULE:=xcelium/2403/24.03.005}"            # matches /apps/XCELIUM2403
+: "${GENUS_MODULE:=genus/211/21.18.000}"                 # matches /apps/GENUS211
+: "${INNOVUS_MODULE:=innovus/211/21.18.000}"             # matches /apps/INNOVUS211 (same family as Genus)
+: "${VERISIUM_MODULE:=verisiumdebug/2403/24.03.001}"     # primary; fallback to simvision (ships in XCELIUM2403)
+: "${PEGASUS_MODULE:=pegasus/232/23.24.000}"             # observed compute-node payload (catalog also has 251)
+: "${SSV_MODULE:=ssv/251/25.12.000}"                     # Tempus/Voltus/Quantus signoff (deferred use)
+: "${VIRTUOSO_MODULE:=}"                                 # ic/icadv/icadvm present; pin when needed
+: "${LAMBDA_PDK_MODULE:=}"                               # no TSMC N16FFC on chamber — pending PDK delivery
 
 # ---- Lambda block list (canonical) ----------------------------------------
 # Source of truth for which block names lambda-* launchers accept.
@@ -120,16 +138,16 @@ if ! type module >/dev/null 2>&1; then
     fi
 fi
 
-# ---- Ensure scratch + logs exist; fall back to /tmp if not writable -------
-# /rscratch is node-local on some chambers and /rscratch/<user>/ is sometimes
-# only provisioned on the utility node (not on compute nodes). If we can't
-# write to LAMBDA_SCRATCH, fall back to /tmp/<user>-lambda so logs and
-# transient artifacts still land somewhere. Per-user override is still
-# possible via ~/.longhorn/lambda.env.
-mkdir -p "$LAMBDA_SCRATCH" "$LAMBDA_LOGS" 2>/dev/null || true
-if [[ ! -w "$LAMBDA_SCRATCH" ]] || [[ ! -d "$LAMBDA_SCRATCH" ]]; then
-    LAMBDA_SCRATCH="/tmp/${USER}-lambda"
-    LAMBDA_LOGS="$LAMBDA_SCRATCH/logs"
-    mkdir -p "$LAMBDA_SCRATCH" "$LAMBDA_LOGS" 2>/dev/null
-    export LAMBDA_SCRATCH LAMBDA_LOGS
+# ---- Ensure work area + logs exist; fall back to /tmp if not writable -----
+# Home is the primary target (NFS, cross-node, persistent). Fallback to LAMBDA_FAST
+# (/tmp/$USER-lambda) only if home is unavailable — wiped on reboot, but better
+# than failing. Per-user override is still possible via ~/.longhorn/lambda.env.
+mkdir -p "$LAMBDA_WORK" "$LAMBDA_LOGS" 2>/dev/null || true
+if [[ ! -w "$LAMBDA_WORK" ]] || [[ ! -d "$LAMBDA_WORK" ]]; then
+    LAMBDA_WORK="$LAMBDA_FAST"
+    LAMBDA_LOGS="$LAMBDA_WORK/logs"
+    LAMBDA_BUILD="$LAMBDA_WORK"
+    LAMBDA_SCRATCH="$LAMBDA_WORK"
+    mkdir -p "$LAMBDA_WORK" "$LAMBDA_LOGS" 2>/dev/null
 fi
+export LAMBDA_WORK LAMBDA_BUILD LAMBDA_LOGS LAMBDA_SCRATCH LAMBDA_FAST

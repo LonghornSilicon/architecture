@@ -31,7 +31,7 @@ SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
 # Source shared infra (fatal if missing — installer should have placed them)
-for _lib in lambda-env.sh lambda-detach.sh; do
+for _lib in lambda-env.sh lambda-run.sh lambda-detach.sh; do
     if [[ ! -f "$SCRIPT_DIR/../lib/$_lib" ]]; then
         echo "ERROR: $SCRIPT_DIR/../lib/$_lib not found" >&2
         echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
@@ -40,6 +40,8 @@ for _lib in lambda-env.sh lambda-detach.sh; do
 done
 # shellcheck source=../lib/lambda-env.sh
 source "$SCRIPT_DIR/../lib/lambda-env.sh"
+# shellcheck source=../lib/lambda-run.sh
+source "$SCRIPT_DIR/../lib/lambda-run.sh"
 # shellcheck source=../lib/lambda-detach.sh
 source "$SCRIPT_DIR/../lib/lambda-detach.sh"
 unset _lib
@@ -75,27 +77,8 @@ fi
 project_abs="$(cd "$(dirname "$project_file")" && pwd)/$(basename "$project_file")"
 project_dir="$(dirname "$project_abs")"
 
-# ---- Load Stratus module ---------------------------------------------------
-if ! type module >/dev/null 2>&1; then
-    echo "ERROR: module command not available." >&2
-    echo "Hint:  run lambda-diagnose for full chamber probe." >&2
-    exit 1
-fi
-
-if ! module load "$STRATUS_MODULE" 2>/dev/null; then
-    cat >&2 <<EOF
-ERROR: 'module load $STRATUS_MODULE' failed.
-
-Possible causes:
-  - Wrong version pinned in tools/lib/lambda-env.sh
-  - Override needed in ~/.longhorn/lambda.env (STRATUS_MODULE=...)
-  - Modules system not initialized in this shell
-
-Check available versions:
-  module avail stratus
-EOF
-    exit 1
-fi
+# ---- Module + binary check (autofs/compute-node aware via shared lib) -----
+lambda_require_tool "$STRATUS_MODULE" stratus_ide || exit 1
 
 # ---- Detach GUI ------------------------------------------------------------
 # Tag identifies this launch in logs. Convention check: if the project lives
@@ -109,7 +92,16 @@ else
 fi
 tag="stratus.${tag_name}.gui"
 
-cd "$project_dir"
+# v0.4 critical fix (was: `cd $project_dir`, which writes Stratus's own working
+# dirs — bdw_work/, <CFG>/, scverify_work/ — alongside project.tcl, i.e. INSIDE
+# the git mirror, regardless of the $::env(LAMBDA_BUILD) read in project.tcl).
+# Run from STRATUS_RUNDIR if exported by the wrapper (lambda-stratus sets it
+# via lambda_rundir); fall back to $project_dir for backwards-compatible raw
+# usage outside the wrapper. Either way, stratus_ide gets the ABSOLUTE
+# project.tcl path so the project loads correctly from any CWD.
+run_dir="${STRATUS_RUNDIR:-$project_dir}"
+mkdir -p "$run_dir" 2>/dev/null || { echo "ERROR: cannot create $run_dir" >&2; exit 1; }
+cd "$run_dir"
 # stratus_ide flag is -project (not -prj). Confirmed via stratus_ide --help
 # output in 22.01.009: "-project <project>  The name of the project file".
-gui_detach "$tag" stratus_ide -project "$(basename "$project_abs")"
+gui_detach "$tag" stratus_ide -project "$project_abs"

@@ -279,7 +279,7 @@ For a teammate seeing the project for the first time:
 | Companion ISA work | Chaithu Talasila — `github.com/LonghornSilicon/adaptive-precision-attention`; reconciliation status in [`reconciliation_chaithu.md`](reconciliation_chaithu.md) |
 | Shuttle program | IMEC / Europractice — `eptsmc@imec.be` |
 | PHY vendor IP | Synopsys DesignWare (LPDDR + PCIe) OR Cadence Denali (LPDDR) + Cadence PCIe Gen3 PHY |
-| EDA flow | Cadence end-to-end: Stratus HLS, Genus, Innovus, Calibre, PrimeTime |
+| EDA flow | Cadence end-to-end: Stratus HLS, Genus, Innovus (Stylus), Xcelium + Verisium Debug, **Pegasus** (DRC/LVS), **Tempus/SSV** (STA), Quantus (extraction), Voltus (power). All-Cadence — matches the shared hosted chamber's tool set; Calibre/PrimeTime are NOT on the chamber. |
 
 ---
 

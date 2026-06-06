@@ -4,15 +4,15 @@
 # ----------------------------------------------------------------------------
 # Lambda-aware Innovus (Stylus Common UI) launcher. Knows the seven Lambda
 # blocks and resolves <block> to:
-#   - run dir:   build/<block>/innovus/            (gitignored; all artifacts)
-#   - flow dir:  src/blocks/<block>/innovus/       (version-controlled .tcl)
+#   - run dir:   $LAMBDA_WORK/<block>/innovus/      (interactive/ + <run-id>/; outside git)
+#   - flow dir:  src/blocks/<block>/innovus/         (version-controlled .tcl)
 # then delegates to the generic innovus-here in the same dir.
 #
 # Usage:
 #   lambda-innovus <block> gui                 # interactive REPL + GUI
 #   lambda-innovus <block> shell               # interactive REPL, no GUI
 #   lambda-innovus <block> batch <flow>        # headless: source flow, exit
-#   lambda-innovus <block> clean               # rm build/<block>/innovus/
+#   lambda-innovus <block> clean               # rm $LAMBDA_WORK/<block>/innovus/
 #   lambda-innovus <block> diagnose            # paths + module availability
 #
 # <flow> for batch is either a bare name resolved against the flow dir
@@ -23,10 +23,12 @@
 #   lambda-innovus mate shell          # text REPL, then `gui_show` to add GUI
 #   lambda-innovus mate batch setup    # run src/blocks/mate/innovus/setup.tcl
 #
-# NOTE (status): UNLIKE the Stratus launchers (smoke-tested on ae03ut01), this
-# launcher has NOT been exercised on the chamber yet — the first ETX run is its
-# smoke test. The gui/shell paths use only verified flags; see the -files
-# caveat in `innovus-here` for the batch path.
+# NOTE (status): `lambda-innovus mate gui` was brought up LIVE on compute node
+# ip-10-2-6-68 (2026-06-06): `innovus -stylus` → Stylus GUI, license `invs`
+# checked out cleanly. v0.4 retiered the run dir to $LAMBDA_WORK/<block>/innovus/
+# and re-pinned to innovus/211/21.18.000 (matched to genus/211 family). The
+# `batch` path's `-files` flag is the remaining unsmoke-tested item — see the
+# documented fallback in `innovus-here`.
 # ============================================================================
 
 set -euo pipefail
@@ -41,13 +43,18 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-if [[ ! -f "$SCRIPT_DIR/../lib/lambda-env.sh" ]]; then
-    echo "ERROR: $SCRIPT_DIR/../lib/lambda-env.sh not found" >&2
-    echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
-    exit 1
-fi
+for _lib in lambda-env.sh lambda-run.sh; do
+    if [[ ! -f "$SCRIPT_DIR/../lib/$_lib" ]]; then
+        echo "ERROR: $SCRIPT_DIR/../lib/$_lib not found" >&2
+        echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
+        exit 1
+    fi
+done
 # shellcheck source=../lib/lambda-env.sh
 source "$SCRIPT_DIR/../lib/lambda-env.sh"
+# shellcheck source=../lib/lambda-run.sh
+source "$SCRIPT_DIR/../lib/lambda-run.sh"
+unset _lib
 
 usage() {
     cat <<EOF
@@ -57,7 +64,7 @@ Subcommands:
   gui                Open Innovus (Stylus) with GUI; interactive REPL
   shell              Open Innovus (Stylus) text REPL, no GUI (then 'gui_show')
   batch <flow>       Headless: source flow .tcl then exit
-  clean              Remove build/<block>/innovus/ (confirmed)
+  clean              Remove \$LAMBDA_WORK/<block>/innovus/ (confirmed)
   diagnose           Show paths + innovus module availability
 
 Blocks: ${LAMBDA_BLOCKS[*]}
@@ -89,14 +96,16 @@ if [[ "$valid" -eq 0 ]]; then
 fi
 
 flow_dir="$LAMBDA_ROOT/src/blocks/$block/innovus"
-run_dir="$LAMBDA_BUILD/$block/innovus"
+tool_root="$LAMBDA_WORK/$block/innovus"
 
 case "$subcmd" in
     gui)
+        run_dir="$(lambda_rundir "$block" innovus gui)" || exit 1
         exec "$SCRIPT_DIR/innovus-here" gui "$run_dir"
         ;;
 
     shell)
+        run_dir="$(lambda_rundir "$block" innovus shell)" || exit 1
         exec "$SCRIPT_DIR/innovus-here" shell "$run_dir"
         ;;
 
@@ -119,19 +128,42 @@ case "$subcmd" in
             echo "Looked for: $flow, $flow_dir/$flow, $flow_dir/${flow}.tcl" >&2
             exit 1
         fi
-        exec "$SCRIPT_DIR/innovus-here" batch "$run_dir" "$flow_file"
+        run_dir="$(lambda_rundir "$block" innovus batch)" || exit 1
+        run_id="$(basename "$run_dir")"
+        # If a Genus-published netlist exists in release/, surface it so the
+        # flow stub (or the eventual real flow) can pick it up. Not hard-fail
+        # because the stub doesn't need a netlist; the real flow will.
+        netlist="$LAMBDA_WORK/$block/release/${block}.mapped.v"
+        if [[ -f "$netlist" ]]; then
+            echo "Found release netlist: $netlist"
+            export LAMBDA_NETLIST="$netlist"
+        else
+            echo "(no $netlist yet — flow stub will skip read_netlist)"
+        fi
+        # set -e + `rc=$?` would skip the publish branch on failure — capture
+        # explicitly with `|| rc=$?` so the documented soft-fail actually works.
+        rc=0
+        "$SCRIPT_DIR/innovus-here" batch "$run_dir" "$flow_file" || rc=$?
+        # On success, publish the routed artifacts if present.
+        if [[ $rc -eq 0 ]]; then
+            for art in "${block}.routed.def" "${block}.routed.v" "${block}.routed.gds"; do
+                [[ -f "$run_dir/outputs/$art" ]] && \
+                    lambda_publish_release "$block" "$run_dir/outputs/$art" "$art" innovus "$run_id" || true
+            done
+        fi
+        exit $rc
         ;;
 
     clean)
-        if [[ ! -d "$run_dir" ]]; then
-            echo "Nothing to clean ($run_dir does not exist)"
+        if [[ ! -d "$tool_root" ]]; then
+            echo "Nothing to clean ($tool_root does not exist)"
             exit 0
         fi
-        echo "Will remove: $run_dir"
-        du -sh "$run_dir" 2>/dev/null || true
+        echo "Will remove: $tool_root"
+        du -sh "$tool_root" 2>/dev/null || true
         read -r -p "Confirm? [y/N] " response
         case "$response" in
-            y|Y|yes|YES) rm -rf "$run_dir"; echo "Removed $run_dir" ;;
+            y|Y|yes|YES) rm -rf "$tool_root"; echo "Removed $tool_root" ;;
             *) echo "Aborted."; exit 1 ;;
         esac
         ;;
@@ -140,14 +172,16 @@ case "$subcmd" in
         echo "Lambda block: $block"
         echo ""
         echo "Paths:"
-        echo "  flow dir:   $flow_dir"
+        echo "  flow dir:    $flow_dir"
         [[ -d "$flow_dir" ]] && echo "                (exists)" || echo "                (none yet — flow .tcl not written)"
-        echo "  run dir:    $run_dir"
-        if [[ -d "$run_dir" ]]; then
-            echo "                ($(du -sh "$run_dir" 2>/dev/null | cut -f1) used)"
+        echo "  tool root:   $tool_root"
+        if [[ -d "$tool_root" ]]; then
+            echo "                ($(du -sh "$tool_root" 2>/dev/null | cut -f1) used)"
+            [[ -L "$tool_root/latest" ]] && echo "                latest -> $(readlink "$tool_root/latest")"
         else
             echo "                (empty; created on first launch)"
         fi
+        echo "  release dir: $LAMBDA_WORK/$block/release"
         echo ""
         echo "Module:"
         echo "  pin:        $INNOVUS_MODULE"

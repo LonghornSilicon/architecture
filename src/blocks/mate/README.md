@@ -36,7 +36,7 @@ See [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md) for the
   - `hls.tcl` — HLS configs and cynth invocations (when multi-config exploration needed)
   - `memgen.tcl` — memory generator config (when any RAMs used)
 
-Build output lands under `<repo>/build/mate/stratus/<config>/` (gitignored).
+Build output lands under `$LAMBDA_WORK/mate/stratus/<config>/` (= `~/work/lambda/mate/stratus/<config>/` by default — **outside** the git mirror so `sync-promote`'s `git reset --hard` can never touch it; see `docs/tools-overview.md` "Filesystem & run-area").
 
 ## Open design questions for the team
 

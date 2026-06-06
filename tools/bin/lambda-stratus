@@ -10,7 +10,7 @@
 # Usage:
 #   lambda-stratus <block> gui                # open IDE on block's project.tcl
 #   lambda-stratus <block> batch <config>     # headless cynth <config>
-#   lambda-stratus <block> clean              # rm build/<block>/stratus/
+#   lambda-stratus <block> clean              # rm $LAMBDA_WORK/<block>/stratus/
 #   lambda-stratus <block> report <config>    # tail latest batch log
 #   lambda-stratus <block> diagnose           # check project.tcl exists, etc.
 #
@@ -31,13 +31,18 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-if [[ ! -f "$SCRIPT_DIR/../lib/lambda-env.sh" ]]; then
-    echo "ERROR: $SCRIPT_DIR/../lib/lambda-env.sh not found" >&2
-    echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
-    exit 1
-fi
+for _lib in lambda-env.sh lambda-run.sh; do
+    if [[ ! -f "$SCRIPT_DIR/../lib/$_lib" ]]; then
+        echo "ERROR: $SCRIPT_DIR/../lib/$_lib not found" >&2
+        echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
+        exit 1
+    fi
+done
 # shellcheck source=../lib/lambda-env.sh
 source "$SCRIPT_DIR/../lib/lambda-env.sh"
+# shellcheck source=../lib/lambda-run.sh
+source "$SCRIPT_DIR/../lib/lambda-run.sh"
+unset _lib
 
 usage() {
     cat <<EOF
@@ -46,7 +51,7 @@ Usage: lambda-stratus <block> <subcommand> [args...]
 Subcommands:
   gui                Open Stratus IDE on the block's project.tcl
   batch <config>     Run Stratus headless with HLS config (e.g., BASIC)
-  clean              Remove build/<block>/stratus/ (confirmed)
+  clean              Remove \$LAMBDA_WORK/<block>/stratus/ (confirmed)
   report <config>    Tail latest batch log for that config
   diagnose           Check project.tcl exists, module loadable, etc.
 
@@ -89,7 +94,11 @@ case "$subcmd" in
             echo "Hint:  lambda-stratus $block diagnose" >&2
             exit 1
         fi
-        # Delegate to generic launcher with absolute path
+        # v0.4: tell the generic launcher to cd into the work area, not the
+        # in-repo project dir. Without this Stratus would write bdw_work/,
+        # <CFG>/, scverify_work/ alongside project.tcl (inside git mirror).
+        STRATUS_RUNDIR="$(lambda_rundir "$block" stratus gui)" || exit 1
+        export STRATUS_RUNDIR
         exec "$SCRIPT_DIR/stratus-gui" "$project_file"
         ;;
 
@@ -103,6 +112,13 @@ case "$subcmd" in
             echo "ERROR: $project_file not found" >&2
             exit 1
         fi
+        # v0.4: per-CFG run dir under $LAMBDA_WORK. Stratus's `cynth <CFG>`
+        # creates its <CFG>/ subdir under CWD — by placing CWD at the per-block
+        # stratus root, the per-CFG subdirs nest naturally (preserves the v0.1
+        # `~/work/lambda/<block>/stratus/<CFG>/` layout, outside the repo).
+        STRATUS_RUNDIR="$LAMBDA_WORK/$block/stratus"
+        mkdir -p "$STRATUS_RUNDIR" 2>/dev/null
+        export STRATUS_RUNDIR
         exec "$SCRIPT_DIR/stratus-batch" "$config" "$project_file"
         ;;
 
@@ -160,18 +176,23 @@ case "$subcmd" in
         echo "Module:"
         echo "  pin:          $STRATUS_MODULE"
         if type module >/dev/null 2>&1; then
-            if module avail "$STRATUS_MODULE" 2>&1 | grep -q "$STRATUS_VERSION"; then
+            # Derive the leaf version from the pin so the grep is meaningful
+            # without referencing an undefined STRATUS_VERSION (was a v0.1 bug
+            # that would crash diagnose under `set -euo pipefail`).
+            _stratus_leaf="${STRATUS_MODULE##*/}"
+            if module avail "$STRATUS_MODULE" 2>&1 | grep -q "$_stratus_leaf"; then
                 echo "                  (available)"
             else
                 echo "                  (NOT FOUND — try: module avail stratus)"
             fi
+            unset _stratus_leaf
         else
             echo "                  (module command not in this shell — run chamber-diagnose)"
         fi
         echo ""
-        echo "Build output dir: $LAMBDA_BUILD/$block/stratus/"
-        if [[ -d "$LAMBDA_BUILD/$block/stratus" ]]; then
-            echo "                  $(du -sh "$LAMBDA_BUILD/$block/stratus" 2>/dev/null | cut -f1) used"
+        echo "Run dir:      $LAMBDA_WORK/$block/stratus/"
+        if [[ -d "$LAMBDA_WORK/$block/stratus" ]]; then
+            echo "                  $(du -sh "$LAMBDA_WORK/$block/stratus" 2>/dev/null | cut -f1) used"
         else
             echo "                  (empty)"
         fi

@@ -12,28 +12,166 @@
 ## TL;DR
 
 ```bash
-# One-time setup (per teammate, on the chamber)
+# One-time setup (per teammate, on the chamber — login node is fine for install)
 sync-promote                                       # pull latest main
 bash ~/architecture/tools/install.sh               # symlinks tools/bin/* into ~/bin/
+                                                   # + provisions ~/work/lambda/{logs,inputs}
+                                                   # + writes stub ~/work/lambda/Makefile
 
-# Daily use (any block, any subcommand)
-lambda-stratus mate gui                            # open IDE on MatE
-lambda-stratus mate batch BASIC                    # headless cynth BASIC
-lambda-stratus mate diagnose                       # what's wrong?
-chamber-diagnose                                   # what's wrong with the chamber itself?
+# Daily use — ALWAYS on a compute node (login node lacks the autofs-mounted tools)
+qsh -q normal.q -now n -V                          # get a compute shell with X11
 
-# Back-end (Innovus, Stylus Common UI) — v0.3, 2026-06-06
-lambda-innovus mate gui                            # Innovus + GUI (no design needed)
-lambda-innovus mate shell                          # Innovus text REPL; then `gui_show`
-lambda-innovus mate batch setup                    # headless: source the flow stub
+cd ~/work/lambda                                   # operate from the run area, NOT the repo
+make diag                                          # chamber + lambda probe (autofs-aware)
 
-# Make wrapper (ergonomic layer over the launchers; run from ETX on the chamber)
-make innovus BLOCK=mate                            # == lambda-innovus mate gui
-make hls     BLOCK=mate CFG=BASIC                  # == lambda-stratus mate batch BASIC
-make diag                                          # == lambda-diagnose
+# HLS (Stratus)
+make gui          BLOCK=mate                       # Stratus IDE
+make hls          BLOCK=mate CFG=BASIC             # headless cynth
+make hls-report   BLOCK=mate CFG=BASIC             # tail latest HLS log
+
+# Synthesis (Genus, Common UI)
+make genus        BLOCK=mate                       # Genus + GUI
+make genus-shell  BLOCK=mate                       # text REPL  (then `gui_show`)
+make genus-batch  BLOCK=mate FLOW=synth            # headless flow
+
+# Simulation (Xcelium xrun) + waveform debug
+make sim          BLOCK=mate ARGS='-access +rwc ...'  # headless xrun
+make sim-gui      BLOCK=mate ARGS='-access +rwc ...'  # SimVision live
+make waves        BLOCK=mate                       # Verisium (Primary) / SimVision (fallback)
+
+# Place & route (Innovus, Stylus Common UI)
+make innovus      BLOCK=mate                       # Innovus + GUI (no design needed)
+make innovus-shell BLOCK=mate                      # text REPL; then `gui_show`
+make innovus-batch BLOCK=mate FLOW=setup           # headless
+
+# Or call launchers directly from any CWD:
+lambda-stratus  mate gui  /  lambda-genus mate gui  /  lambda-innovus mate gui
+lambda-xcelium  mate sim <args>  /  lambda-verisium mate
+chamber-diagnose                                   # raw chamber probe
 ```
 
-That's the whole interface. Everything below is justification, mental models, and extrapolation paths.
+That's the whole interface. Everything below is justification, mental models, and extrapolation paths. **Two facts to internalize first** — see "Chamber execution model" below: tools live on COMPUTE nodes only, `/apps` is AUTOFS.
+
+---
+
+## Chamber execution model
+
+Three ground-truth facts about this chamber, all confirmed by a live debug session on **2026-06-06** (compute node `ip-10-2-6-68`). Anyone running the flow needs all three internalized — they reshape what "module avail" means.
+
+### 1. `/apps/<TOOL>` is autofs — the catalog ≠ what's installed
+
+`module avail` enumerates a global modulefile catalog at `/home/cm_admin/.../modulefiles/` — hundreds of tool×version combinations across the chamber's history. The actual software payload under `/apps/<TOOL>` is **automounted on demand**. Cold-listing `/apps/` from a shell shows only what is *currently mounted*; the rest appears the moment a `module load` (which appends `/apps/<TOOL>/bin` to `PATH`) and the next PATH scan touches the path. An earlier "Innovus isn't installed" call here was wrong — it was an `ls` of a cold automount. **All catalogued tools are present** once accessed.
+
+Diagnostic implication baked into `chamber-diagnose` v0.4: the tool-availability check is now **load-then-test** (`module load <spec>` → `command -v <binary>`), not pre-load `command -v` (which always fails before the autofs trigger).
+
+### 2. Tools live on COMPUTE nodes, not the login node
+
+The login node (e.g. `ae03ut01`) carries only the heavy interactive tools (Virtuoso + vManager). The **digital + sim tools** (Stratus, Genus, Innovus, Xcelium, Pegasus, SSV, Verisium) automount on **compute nodes** reached via:
+
+```csh
+qsh -q normal.q -now n -V
+```
+
+The original `lambda-innovus mate gui` failure earlier in v0.3 was a login-node run, not a launcher bug. **Every launcher in v0.4 detects this** via `lambda_require_tool` (in `tools/lib/lambda-run.sh`): if a module loads but the binary doesn't appear on PATH, the error explicitly names the LOGIN-vs-compute distinction and prints the `qsh` command.
+
+### 3. Module pins: three-level leaves matched to the installed family
+
+Two-level specs like `innovus/251` are technically valid (Environment Modules resolves to the default leaf, e.g. `25.14-e035_1`). But v0.4 pins **three-level leaves** for two reasons that matter at org scale:
+
+- **Reproducibility** — locks the version against silent default drift across nodes/time.
+- **Matched release family** — Genus and Innovus on the *same* family share database format. Newest Genus on this chamber is `genus/211/21.18.000` (no 25x exists). So `innovus/211/21.18.000` is the matched pin; `innovus/251` (defaults to 25.14) would force a cross-version DB handoff (supported but ugly).
+
+**Confirmed-installed matched set** (debug session 2026-06-06, on compute node `ip-10-2-6-68`):
+
+| Tool | Module pin | Install path | Confirmed via |
+|---|---|---|---|
+| Stratus HLS | `stratus/2201/22.01.009` | `/apps/STRATUS2201/22.01.009` | v0.1 smoke test |
+| Genus | `genus/211/21.18.000` | `/apps/GENUS211/21.18.000` | autofs touch + `module show` |
+| Xcelium | `xcelium/2403/24.03.005` | `/apps/XCELIUM2403/24.03.005` | autofs touch + `module load` |
+| Innovus (Stylus) | `innovus/211/21.18.000` | `/apps/INNOVUS211/21.18.000` | Stylus GUI brought up live |
+| Verisium Debug | `verisiumdebug/2403/24.03.001` | TBD (binary name `verisium` is the first-run gate) | catalog only — fallback: `simvision` (ships in `XCELIUM2403`) |
+| Pegasus (DRC/LVS) | `pegasus/232/23.24.000` | autofs (compute-node payload) | catalog only — usage deferred |
+| SSV (Tempus/Voltus/Quantus) | `ssv/251/25.12.000` | autofs | catalog only — usage deferred |
+
+Override any pin per-user in `~/.longhorn/lambda.env` (e.g., `export INNOVUS_MODULE=innovus/251/25.14-e035_1` if a project needs to switch families).
+
+### 4. Tool flow — all-Cadence, no Calibre/PrimeTime
+
+The chamber is 100% Cadence. The signoff path is:
+
+```
+Pegasus  (DRC/LVS — replaces Calibre)
+Tempus / SSV  (STA — replaces PrimeTime)
+Quantus  (parasitic extraction)
+Voltus   (power/IR)
+```
+
+Earlier README/handoff prose that named Calibre + PrimeTime was wrong for this chamber; corrected in v0.4.
+
+---
+
+## Filesystem & run-area architecture
+
+The repo, the run area, and the release artifacts each live in a different place. This is the org-scale decision in v0.4, and it's the single most important thing a new teammate needs to understand to avoid losing work to a `sync-promote`.
+
+### Three storage classes, three locations
+
+| Class | Variable | Default path | Synced? | Who writes |
+|---|---|---|---|---|
+| **Source / methodology** | `$LAMBDA_ROOT` | `~/architecture` | git mirror (RO) | humans |
+| **Run / work** | `$LAMBDA_WORK` | `~/work/lambda` | no | tools |
+| **Ephemeral** | `$LAMBDA_FAST` | `/tmp/$USER-lambda` | no | tools (fallback) |
+| **Release / handoff** | (under `$LAMBDA_WORK`) | `~/work/lambda/<block>/release/` | no (manifested) | launchers, on success |
+
+**Why home is the canonical run area:** the SFTP enum and the live debug confirmed there is no `/rscratch/$USER` provisioned (catalog dir exists; `/rscratch/schwartz` does not), no team-group dir under `/projects/`, and `/tmp` is node-local + wiped on reboot. **NFS home is the only reliable persistent writable space cross-node.** A `/projects/<group>/lambda` request to chamber admin is the escalation path for full-chip-scale runs (home quota).
+
+**Why outside the repo:** `sync-promote` does `git reset --hard origin/main` on `~/architecture`. Tool output landing inside the mirror would be destroyed by every sync. In v0.1-v0.3 it survived only because `build/` was gitignored — luck, not design, broken by `git clean`.
+
+### Layout under `$LAMBDA_WORK`
+
+```
+~/work/lambda/                        ($LAMBDA_WORK; home-backed; NOT in git)
+├── Makefile                          stub: include $HOME/architecture/Makefile
+├── logs/                              all launcher logs (xxx.<block>.<mode>.<ts>.log)
+├── inputs/                            non-git inputs delivered by SFTP
+│                                       (vendor IP, future team PDK, etc.)
+└── <block>/                            mate, kce, vecu, tiu, msc, lsu, hif
+    ├── stratus/<CFG>/                 HLS RTL + bdw_work    (lambda-stratus)
+    ├── genus/
+    │   ├── interactive/                 gui / shell sessions (stable dir)
+    │   ├── <run-id>/                   batch run (UTC YYYYMMDD-HHMMSS)
+    │   │   ├── outputs/<b>.mapped.v
+    │   │   ├── reports/{timing,area,power}.rpt
+    │   │   └── genus.log, genus.cmd
+    │   └── latest -> <run-id>          symlink to newest
+    ├── xcelium/
+    │   ├── <run-id>/
+    │   │   ├── xcelium.d/              compile DB
+    │   │   ├── xrun.log
+    │   │   └── waves.shm/              (if -access +rwc)
+    │   └── latest -> <run-id>
+    ├── verisium/<session>/             debug session state (reads ../xcelium/latest/waves.shm)
+    ├── innovus/
+    │   ├── interactive/                 gui / shell sessions
+    │   ├── <run-id>/                   batch
+    │   │   └── outputs/<b>.routed.{def,v,gds}
+    │   └── latest -> <run-id>
+    └── release/                        STABLE cross-stage handoff + MANIFEST
+        ├── <b>.mapped.v                genus → innovus
+        ├── <b>.routed.{def,v,gds}      innovus → pegasus
+        └── MANIFEST                    UTC, tool, run-id, git sha per artifact
+```
+
+**run-id** = UTC `YYYYMMDD-HHMMSS`; the `latest` symlink in each tool dir points at the newest batch. **GUI/shell** sessions use a stable `interactive/` dir (no timestamp clutter). **Batch never clobbers** prior runs — preserves reproducibility + parametric sweeps. The `release/` contract decouples a messy run from the current-good artifact: the next tool reads from `release/`, not from a sibling's run dir.
+
+### You operate from `~/work/lambda`
+
+```bash
+cd ~/work/lambda
+make genus BLOCK=mate                  # outputs land in ~/work/lambda/mate/genus/...
+```
+
+Methodology comes from the versioned repo via the stub `Makefile`'s `include $(HOME)/architecture/Makefile`. Launchers (`~/bin`, on PATH from `tools/install.sh`) work from any CWD. This is the best-of-both — the user's intuition that "you should run from the schwartz space, not the repo" is exactly right and now enforced by the architecture.
 
 ---
 
@@ -163,9 +301,9 @@ build/<block>/innovus/...          DEF/GDS/SDF
 
 Each step has its own Tcl: `genus/synth.tcl`, `innovus/{init,floorplan,place,cts,route,signoff}.tcl` (the Innovus Foundation Flow convention). The real *flow content* is deferred to v0.5 because it needs a readable PDK — but the **Innovus launcher itself landed in v0.3** and runs today with no design (bring-up, GUI, Tcl sourcing).
 
-### Verified Innovus 25.1 Stylus Common UI invocation
+### Verified Innovus 21.18 Stylus Common UI invocation
 
-Ground truth for `innovus/251` (= 25.1; chamber has `innovus/{171..251}`), verified against the *Innovus Stylus Common UI User Guide v25.10* + *Stylus Text Command Reference* (web, 2026-06-06). The `lambda-innovus` / `innovus-here` launchers bake these in:
+Ground truth for the v0.4 pin `innovus/211/21.18.000` (= 21.18, the released family that matches `genus/211/21.18.000` — see Chamber execution model §3 above for why we don't default to the catalog newest `innovus/251`/25.14). Stylus syntax and flags also apply to 25.1 if you override the pin; verified against the *Innovus Stylus Common UI User Guide* + *Stylus Text Command Reference* (web, 2026-06-06) plus a live `module show innovus/251` (to confirm 251 defaults to 25.14, hence the pin choice) AND a live Stylus GUI launch under `module load innovus/211/21.18.000` on compute node `ip-10-2-6-68` (2026-06-06; license `invs` checked out clean). The `lambda-innovus` / `innovus-here` launchers bake these in:
 
 ```
 innovus -stylus                 # enable Stylus Common UI (interactive REPL + GUI)
@@ -293,9 +431,10 @@ Trigger to split: **the second project lands.** At that point, factor `tools/bin
 | Version | Scope | Status |
 |---|---|---|
 | **v0.1** (2026-05-17, commits `c6aa57d` → `7a5034f`) | `lambda-env.sh`, `lambda-detach.sh`, `stratus-{gui,batch}`, `chamber-diagnose`, `lambda-{stratus,diagnose}`, `install.sh`, stub `src/blocks/mate/stratus/project.tcl` | **PASSED.** Smoke test on `ae03ut01` (utility) + compute node 2026-05-17: `lambda-stratus mate gui` opens IDE cleanly on stub project. |
-| **v0.3** (2026-06-06) | `innovus-here` + `lambda-innovus` (Stylus Common UI: `gui`/`shell`/`batch`/`diagnose`/`clean`), root `Makefile` flow wrapper, stub `src/blocks/mate/innovus/setup.tcl`, `INNOVUS_MODULE`/`GENUS_MODULE`/`PEGASUS_MODULE`/`SSV_MODULE` pinned from observed chamber modulefiles | **AUTHORED, NOT YET CHAMBER-TESTED.** Unlike v0.1, this was written off-chamber (the repo-sync SFTP channel is read/exec-blocked). The first ETX run is the smoke test. `gui`/`shell` use only verified flags (`-stylus`, `-no_gui`, `-log`); `batch`'s `-files` is the one unverified flag — fallback documented in `innovus-here`. |
-| **v0.2** (when MatE HLS source lands) | `xrun-here`, `lambda-xrun`, license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | Gated on MatE HLS C++ source committed. |
-| **v0.5** (when a real PDK is readable from ETX) | `genus-here`/`lambda-genus`, `lambda-pegasus` (DRC/LVS), `lambda-tempus` (STA via SSV), `virtuoso-here`; a real `init_design`→`route`→`signoff` flow replacing the `setup.tcl` stub | **Gated on PDK, not on tools.** The tools (`genus/211`, `innovus/251`, `pegasus/251`, `ssv/251`) are all present on the chamber. What's missing is the PDK: `/process/hosted` has only `gpdk` + `skywater` — **no TSMC N16FFC**. `advgpdk` (the installed `cds_ff_mpt`) is the only FinFET-class vehicle and is usable for flow bring-up; the real-process flow waits on PDK delivery via `/process/hosted/xfer/incoming/` (admin-gated, TSMC University FinFET NDA). |
+| **v0.3** (2026-06-06) | `innovus-here` + `lambda-innovus` (Stylus Common UI: `gui`/`shell`/`batch`/`diagnose`/`clean`), root `Makefile` flow wrapper, stub `src/blocks/mate/innovus/setup.tcl`, initial module pins (`innovus/251`, `xcelium/2109`) | **CHAMBER-CONFIRMED LIVE 2026-06-06.** Innovus Stylus GUI launched on compute node `ip-10-2-6-68`, license `invs` checked out clean. Initial pins were wrong (login-node debug confused autofs with "not installed"; v0.4 corrects them). |
+| **v0.4** (2026-06-06) | `tools/lib/lambda-run.sh` (shared `lambda_require_tool`/`lambda_rundir`/`lambda_publish_release`), new launchers `genus-here`+`lambda-genus`, `xrun-here`+`lambda-xcelium`, `verisium-here`+`lambda-verisium`; Genus synth stub `src/blocks/mate/genus/synth.tcl`; CORRECTED module pins to confirmed-installed three-level matched family (`stratus/2201/22.01.009`, `genus/211/21.18.000`, `innovus/211/21.18.000`, `xcelium/2403/24.03.005`); **run-area relocation from `~/architecture/build/` → `~/work/lambda/`** (`$LAMBDA_WORK` home-backed; `LAMBDA_BUILD` aliased for back-compat; `src/blocks/mate/stratus/project.tcl` reads `$::env(LAMBDA_BUILD)` so Tcl follows bash); release/ handoff contract + MANIFEST; `chamber-diagnose` switched to autofs-aware load-then-test + node-type detection; README/handoff Calibre→Pegasus + PrimeTime→Tempus/SSV; this docs section. | **AUTHORED, FIRST-RUN GATE PENDING.** Interactive paths use only verified flags + correct pins. Two unverified items isolated with named fallbacks: (a) `verisium` binary name → falls back to `simvision` (ships in `XCELIUM2403`); (b) `xcelium/2403` may need pin-bump on other nodes (per-user override in `~/.longhorn/lambda.env`). |
+| **v0.2** (when MatE HLS source lands) | license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | Gated on MatE HLS C++ source committed. |
+| **v0.5** (when a real PDK is readable from ETX) | `lambda-pegasus` (DRC/LVS), `lambda-tempus` (STA via SSV), `lambda-quantus`, `lambda-voltus`, `lambda-virtuoso`; a real `init_design`→`route`→`signoff` flow replacing the `setup.tcl` + `synth.tcl` stubs | **Gated on PDK, not on tools.** The tools (`pegasus/232`, `ssv/251`, plus Genus/Innovus/Xcelium from v0.4) are present on compute nodes. What's missing is the PDK: `/process/hosted` has only `gpdk` + `skywater` — **no TSMC N16FFC**. `advgpdk` (the installed `cds_ff_mpt`) is the only FinFET-class vehicle and is usable for flow bring-up; the real-process flow waits on PDK delivery via `/process/hosted/xfer/incoming/` (admin-gated, TSMC University FinFET NDA). |
 
 ---
 
@@ -324,7 +463,9 @@ Eight issues hit during the iterative chamber smoke test. Documented because the
 | Module init path varies by chamber | Resolved | `lambda-env.sh` auto-detects via `$MODULESHOME/init/bash`. Per-user override via `LAMBDA_MODULE_INIT` in `~/.longhorn/lambda.env` for non-standard chambers. |
 | Only `mate` block has a stub `project.tcl` so far | Open | Other six blocks' READMEs reference `stratus/project.tcl` (the convention is set). Each block gets its real `project.tcl` when HLS source for that block begins. Follow `src/blocks/mate/stratus/project.tcl` and the canonical syntax under "Verified Stratus 22.01.009 Tcl syntax" above. |
 
-## Verified versions (chamber `ae03ut01`, UT Austin / Cadence)
+## Verified versions (chamber — login + compute classes; debug session 2026-06-06)
+
+Login class confirmed on `ae03ut01`; compute class confirmed on `ip-10-2-6-68` and `ip-10-2-6-30`. The chamber is an AWS-backed Cadence hosted environment; `/apps/<TOOL>` is autofs (mounts on `module load` + PATH touch — see Chamber execution model §1).
 
 | Component | Version / path |
 |---|---|
@@ -332,10 +473,15 @@ Eight issues hit during the iterative chamber smoke test. Documented because the
 | Login shell | `/bin/csh` |
 | Modules system | Environment Modules v3.2.6a at `/apps/modules-v3.2.6a-64bit/Modules` |
 | `MODULEPATH` | `/home/cm_admin/modules/Linux/modulefiles` |
-| Stratus HLS | `stratus/2201/22.01.009` |
-| Xcelium | `xcelium/2109/21.09.009` |
-| Storage tiers | `/projects` (backed up), `/rscratch` (utility-only, not compute), `/apps/hosted`, `/process/hosted`, `/grid/common/pkgs` |
-| Compute submission | `qsh -q normal.q -now n -V` |
+| Stratus HLS | `stratus/2201/22.01.009` → `/apps/STRATUS2201/22.01.009/` |
+| Genus | `genus/211/21.18.000` → `/apps/GENUS211/21.18.000/` |
+| Innovus (Stylus) | `innovus/211/21.18.000` → `/apps/INNOVUS211/21.18.000/` (live-launched 2026-06-06) |
+| Xcelium | `xcelium/2403/24.03.005` → `/apps/XCELIUM2403/24.03.005/` (bundles `simvision`) |
+| Verisium Debug | `verisiumdebug/2403/24.03.001` (catalog; first-run gate) |
+| Pegasus (DRC/LVS) | `pegasus/232/23.24.000` (compute-node catalog) |
+| SSV (Tempus/Voltus/Quantus) | `ssv/251/25.12.000` (signoff — deferred) |
+| Storage tiers | `~/architecture` (git mirror, RO) · `~/work/lambda` (run area, home/NFS) · `/tmp/$USER-lambda` (ephemeral) · `/projects/<group>` (not provisioned for this team) · `/rscratch/$USER` (not provisioned) |
+| Compute submission | `qsh -q normal.q -now n -V` (X11-forwarded interactive) |
 
 ---
 
@@ -343,7 +489,7 @@ Eight issues hit during the iterative chamber smoke test. Documented because the
 
 | File | Type | Lines | Purpose |
 |---|---|---|---|
-| `tools/install.sh` | installer | ~80 | Idempotent: symlinks `tools/bin/*` into `~/bin/`, creates scratch dir, runs `lambda-diagnose`. |
+| `tools/install.sh` | installer | ~120 | **v0.4 expanded.** Idempotent: symlinks `tools/bin/*` into `~/bin/` (picks up new launchers via glob); provisions `~/work/lambda/{logs,inputs}` (the home-backed run area); writes a 2-line stub `~/work/lambda/Makefile` (uses `?=` so user overrides win); runs `lambda-diagnose`. |
 | `tools/lib/lambda-env.sh` | sourced | ~60 | Default paths, tool module pins, Lambda block list, module init bootstrap. Sources `~/.longhorn/lambda.env` if present (per-user override). |
 | `tools/lib/lambda-detach.sh` | sourced | ~55 | `gui_detach <tag> <tool> <args...>`: nohup + log + PID file. Encapsulates the csh-vs-bash GUI backgrounding pattern. |
 | `tools/bin/stratus-gui` | generic launcher | ~70 | Opens `stratus_ide -prj <file>` on a project.tcl in CWD or an explicit path. Module load + X11 check + detach. |
@@ -351,9 +497,18 @@ Eight issues hit during the iterative chamber smoke test. Documented because the
 | `tools/bin/chamber-diagnose` | generic probe | ~120 | Shell, X11, module system, tool availability, storage paths, license server, `~/bin/` PATH check. Read-only. |
 | `tools/bin/lambda-stratus` | project wrapper | ~140 | Resolves `<block>` to its `stratus/project.tcl`; delegates to `stratus-gui` / `stratus-batch`. Adds `clean`, `report`, `diagnose` subcommands. |
 | `tools/bin/lambda-diagnose` | project probe | ~70 | Runs `chamber-diagnose` then adds Lambda-specific checks: LAMBDA_ROOT, git HEAD, per-block project.tcl presence. |
-| `tools/bin/innovus-here` | generic launcher | ~150 | **v0.3.** Foreground Innovus (Stylus) launcher: `gui`/`shell`/`batch` modes. Verified-flags-only on interactive paths; `-files` quarantined to batch. |
-| `tools/bin/lambda-innovus` | project wrapper | ~170 | **v0.3.** Resolves `<block>` to `build/<block>/innovus/` run dir + `src/blocks/<block>/innovus/` flow dir; delegates to `innovus-here`. `gui`/`shell`/`batch`/`clean`/`diagnose`. |
-| `Makefile` (repo root) | flow wrapper | ~120 | **v0.3.** Ergonomic + dependency-DAG layer over the launchers. `make {gui,hls,innovus,innovus-shell,diag,...} BLOCK=<b>`. Thin: delegates to bash launchers, does not reimplement chamber resilience. |
-| `src/blocks/mate/innovus/setup.tcl` | flow stub | ~70 | **v0.3.** Stub Stylus flow: documents the Foundation-flow skeleton; live body is pure-core Tcl (no unverified Cadence commands). Exits in batch via `INNOVUS_BATCH`. |
+| `tools/bin/innovus-here` | generic launcher | ~150 | **v0.3, v0.4 retrofit.** Foreground Innovus (Stylus) launcher: `gui`/`shell`/`batch`. Verified-flags-only on interactive; `-files` for batch. v0.4 uses `lambda_require_tool` from `lambda-run.sh`. |
+| `tools/bin/lambda-innovus` | project wrapper | ~190 | **v0.3, v0.4 retrofit.** Resolves `<block>` to `$LAMBDA_WORK/<block>/innovus/` run dir + `src/blocks/<block>/innovus/` flow dir; uses `lambda_rundir` for interactive vs `<run-id>`/batch; on batch success publishes `<block>.routed.{def,v,gds}` to `release/` via `lambda_publish_release`. |
+| `Makefile` (repo root) | flow wrapper | ~190 | **v0.3, v0.4 expanded.** Ergonomic + dependency-DAG layer. v0.4 adds `genus`/`genus-shell`/`genus-batch`, `sim`/`sim-gui`/`sim-batch`, `waves`/`waves-diag`, plus updated help and `$LAMBDA_WORK`-rooted FLOW DAG. |
+| `src/blocks/mate/innovus/setup.tcl` | flow stub | ~70 | **v0.3.** Stub Stylus flow: documents the Foundation-flow skeleton; live body is pure-core Tcl. Exits in batch via `INNOVUS_BATCH`. |
+| `tools/lib/lambda-run.sh` | sourced | ~150 | **v0.4.** Shared launcher helpers: `lambda_require_tool` (autofs/compute-node aware module-load + binary check, emits the LOGIN-vs-compute hint), `lambda_rundir` (interactive vs timestamped batch + `latest` symlink), `lambda_publish_release` (cross-stage handoff to `release/` + MANIFEST). |
+| `tools/bin/genus-here` | generic launcher | ~125 | **v0.4.** Foreground Genus (Common UI is default; NO `-stylus`): `gui`/`shell`/`batch`. `batch` uses `-no_gui -files` + `GENUS_BATCH=1`. |
+| `tools/bin/lambda-genus` | project wrapper | ~155 | **v0.4.** Resolves `<block>` to `$LAMBDA_WORK/<block>/genus/`; publishes `<block>.mapped.v` to `release/` on batch success. |
+| `tools/bin/xrun-here` | generic launcher | ~115 | **v0.4.** Xcelium `xrun` driver: `sim` (headless), `gui` (SimVision live via `-gui`), `batch` (`xrun -f <args>`). Dumps `xcelium.d/`, `waves.shm/` in the run dir. |
+| `tools/bin/lambda-xcelium` | project wrapper | ~170 | **v0.4.** Resolves `<block>` to `$LAMBDA_WORK/<block>/xcelium/`; `waves` subcommand jumps to `lambda-verisium` on the latest run's `waves.shm`. |
+| `tools/bin/verisium-here` | generic launcher | ~100 | **v0.4.** Waveform-debug GUI: tries `verisium debug -input <waves>` first; falls back to `simvision -waves <waves>` (ships in `XCELIUM2403`, decade-stable). Documented confidence ladder. |
+| `tools/bin/lambda-verisium` | project wrapper | ~105 | **v0.4.** `lambda-verisium <block>` opens the latest xcelium run's `waves.shm`; `<block> diagnose` shows runs found + primary/fallback pins. |
+| `src/blocks/mate/genus/synth.tcl` | flow stub | ~75 | **v0.4.** Stub Common-UI synth flow mirroring `setup.tcl` style: pure-Tcl body, no PDK paths, exits via `GENUS_BATCH`. Documents the Common-UI synth skeleton (`read_hdl`/`elaborate`/`syn_generic`/`syn_map`/`write_hdl`). |
+| `src/blocks/mate/stratus/project.tcl` | HLS project | ~75 | **v0.1, v0.4 fix.** Stub HLS project (no `define_hls_*` until source lands). v0.4 reads `$::env(LAMBDA_BUILD)` so Stratus follows the bash retier — without this, output silently kept writing into the repo mirror. |
 
-Total: ~1170 lines across 13 files. Small, auditable, version-controlled.
+Total: ~2200 lines across 20 files. Small, auditable, version-controlled.

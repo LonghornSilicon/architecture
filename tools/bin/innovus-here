@@ -20,25 +20,32 @@
 #   session (not from a script, not nohup'd).
 #
 # Verified facts baked in (do not "fix" without re-verifying):
-#   - Stylus Common UI is enabled with `innovus -stylus`.
-#       Ground truth: Innovus Stylus Common UI User Guide v25.10 (chamber has
-#       innovus/251 = 25.1). `innovus -no_gui -stylus` is the headless form.
+#   - Stylus Common UI is enabled with `innovus -stylus`. Ground truth: the
+#       Innovus Stylus Common UI User Guide (v21.1 series; flags also apply on
+#       25.1 — confirmed by live `module show innovus/251` on the chamber).
+#       Chamber pin: innovus/211/21.18.000 (matched to genus/211 family for
+#       clean Genus→Innovus DB handoff). `innovus -no_gui -stylus` is the
+#       headless form.
 #   - GUI is controlled in Common UI with `gui_show` / `gui_hide`
 #       (the legacy-UI equivalent is `win`). In `gui` mode below the window
 #       auto-opens; if your version does not auto-open, just type `gui_show`.
+#       Live-confirmed: `innovus -stylus` opens the Stylus GUI cleanly on
+#       compute node ip-10-2-6-68 (2026-06-06), license `invs` checked out.
 #   - `-log <file>` sets the log basename.
 #   - `-files <script>` sources a Tcl script. This flag is used ONLY by `batch`
-#       mode. It is the Common UI script-source flag per the v25.10 Text Command
-#       Reference, but is the one flag here not yet smoke-tested on 25.1. If a
-#       `batch` run rejects `-files`, FALLBACK: `innovus-here shell <rundir>`
-#       then `source <flow.tcl>` at the prompt, and report the correct flag so
-#       it can be pinned here.
+#       mode. It is the documented Common UI script-source flag, but is the
+#       remaining unsmoke-tested item on 21.18 (the `gui`/`shell` paths were
+#       live-confirmed). FALLBACK if a `batch` run rejects `-files`:
+#       `innovus-here shell <rundir>` then `source <flow.tcl>` at the prompt,
+#       and report the correct flag so it can be pinned here.
 #
 # Module + license:
-#   Loads $INNOVUS_MODULE (default innovus/251, see tools/lib/lambda-env.sh),
+#   Loads $INNOVUS_MODULE (default innovus/211/21.18.000, see tools/lib/lambda-env.sh),
 #   which also sets CDS_LIC_FILE. Innovus acquires its license at startup; a
 #   license failure surfaces as a clear Innovus error (license preflight is a
-#   v0.2 item, not wired here).
+#   v0.2 item, not wired here). Module load + binary check goes through
+#   lambda_require_tool (tools/lib/lambda-run.sh) so the autofs/compute-node
+#   diagnostic is uniform across launchers.
 # ============================================================================
 
 set -euo pipefail
@@ -54,13 +61,18 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$_src")" && pwd)"
 unset _src _dir
 
-if [[ ! -f "$SCRIPT_DIR/../lib/lambda-env.sh" ]]; then
-    echo "ERROR: $SCRIPT_DIR/../lib/lambda-env.sh not found" >&2
-    echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
-    exit 1
-fi
+for _lib in lambda-env.sh lambda-run.sh; do
+    if [[ ! -f "$SCRIPT_DIR/../lib/$_lib" ]]; then
+        echo "ERROR: $SCRIPT_DIR/../lib/$_lib not found" >&2
+        echo "Hint:  re-run bash ~/architecture/tools/install.sh" >&2
+        exit 1
+    fi
+done
 # shellcheck source=../lib/lambda-env.sh
 source "$SCRIPT_DIR/../lib/lambda-env.sh"
+# shellcheck source=../lib/lambda-run.sh
+source "$SCRIPT_DIR/../lib/lambda-run.sh"
+unset _lib
 
 # ---- Arg parsing -----------------------------------------------------------
 mode="${1:-}"
@@ -96,26 +108,9 @@ fi
 # Absolute-ize the flow before we cd into the run dir.
 [[ -n "$flow" ]] && flow="$(cd "$(dirname "$flow")" && pwd)/$(basename "$flow")"
 
-# ---- Module ----------------------------------------------------------------
-if ! type module >/dev/null 2>&1; then
-    echo "ERROR: module command not available. Run lambda-diagnose." >&2
-    exit 1
-fi
+# ---- Module + binary check (autofs/compute-node aware via shared lib) -----
 : "${INNOVUS_MODULE:?INNOVUS_MODULE not set; check tools/lib/lambda-env.sh}"
-if ! module load "$INNOVUS_MODULE" 2>/dev/null; then
-    cat >&2 <<EOF
-ERROR: 'module load $INNOVUS_MODULE' failed.
-
-Check available versions:  module avail innovus
-Override (per-user):       echo 'export INNOVUS_MODULE=innovus/<ver>' >> ~/.longhorn/lambda.env
-EOF
-    exit 1
-fi
-if ! command -v innovus >/dev/null 2>&1; then
-    echo "ERROR: 'innovus' not in PATH after loading $INNOVUS_MODULE." >&2
-    echo "Hint:  lambda-diagnose" >&2
-    exit 1
-fi
+lambda_require_tool "$INNOVUS_MODULE" innovus || exit 1
 
 # ---- X11 preflight (gui mode only) -----------------------------------------
 if [[ "$mode" == "gui" && -z "${DISPLAY:-}" ]]; then
@@ -127,8 +122,9 @@ fi
 
 # ---- Run dir + log ---------------------------------------------------------
 # All Innovus artifacts (innovus.log*, innovus.cmd*, db, reports) land in the
-# run dir, which the Lambda wrapper points under build/ (gitignored). Run dir
-# is created if absent so a no-design bring-up works on day one.
+# run dir, which the Lambda wrapper places under $LAMBDA_WORK/<block>/innovus/
+# (outside the git mirror; see docs/tools-overview.md "Filesystem & run-area").
+# Run dir is created if absent so a no-design bring-up works on day one.
 mkdir -p "$rundir" 2>/dev/null || {
     echo "ERROR: cannot create run dir: $rundir" >&2; exit 1; }
 cd "$rundir"

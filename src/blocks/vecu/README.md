@@ -24,5 +24,5 @@ Heart of the chip. Per attention row, each lane keeps (m_i, l_i, O_i) running st
 - `lane.h` — single FP/BF lane (gets replicated 8×)
 - `lut.h` — transcendental LUT primitive (exp/rsqrt/sigmoid share the structure)
 - `microcode/` — assembler-ready microcode source for the standard ops
-- `tb/` — testbench
-- `stratus.tcl`
+- `tb/` — testbench (peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))

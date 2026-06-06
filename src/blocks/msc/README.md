@@ -28,5 +28,5 @@ The MSC does NOT include the LPDDR5X PHY itself — that's vendor IP (Synopsys D
 - `block_table.h` — 128-entry CAM-style block table
 - `xbar.h` — 4-port SRAM crossbar
 - `dfi.h` — DFI 5.x PHY interface (binds to vendor PHY at chip integration)
-- `tb/` — testbench
-- `stratus.tcl`
+- `tb/` — testbench (peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))

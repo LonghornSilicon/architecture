@@ -179,7 +179,7 @@ The TIU update is essentially free: it piggybacks on the softmax tile cadence wi
 - **MSC eviction policy** — when the kv_scratchpad fills, MSC asks TIU for the lowest-importance block and evicts that one (H2O-style heavy-hitter retention)
 - **KCE-mini per-block precision** — when KCE re-compresses an evicted-and-recalled block, it queries TIU to decide whether to keep it at 4.0 bpe (high importance) or demote to 3.0 bpe (mid) or 2.0 bpe (low importance, attention-sink-like)
 
-TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. It's brand new to Lambda v0.4 (added 2026-05-14 after the Phase 0 audit decisions). The CSR mode field `tiu_eviction_policy` lets the chip switch among off / H2O / streaming-LLM / adaptive-precision policies — useful both as a research ablation knob and as a per-workload tuning lever.
+TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. It was added to Lambda on 2026-05-14 (Phase 0.3, after the Phase 0 audit decisions). Its `csr_modes` field lets the chip switch among `tiu_off` / `tiu_h2o` / `tiu_streaming_llm` / `tiu_adaptive_precision` — useful both as a research ablation knob and as a per-workload tuning lever.
 
 ---
 

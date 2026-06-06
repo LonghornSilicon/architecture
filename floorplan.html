@@ -285,6 +285,12 @@
   <text x="462" y="338" text-anchor="middle" class="die-block-sub" font-size="10">routing buffer</text>
   <text x="462" y="352" text-anchor="middle" class="die-block-sub" font-size="10">~0.40 mm² distributed</text>
 
+  <!-- TIU (Token Importance Unit, NEW 2026-05-14): top-right above LSU, 0.03 mm² -->
+  <rect x="400" y="175" width="55" height="40" fill="#fed7aa" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="3,2"/>
+  <text x="427" y="190" text-anchor="middle" class="die-block-label" font-size="11" fill="#ea580c">TIU</text>
+  <text x="427" y="202" text-anchor="middle" class="die-block-sub" font-size="8">256 B · entropy acc</text>
+  <text x="427" y="212" text-anchor="middle" class="die-block-sub" font-size="8">0.03 mm² · NEW</text>
+
   <!-- ============ Annotations / arrows ============ -->
 
   <!-- weight_buf → MatE arrow -->
@@ -301,10 +307,23 @@
     <marker id="arrowgreen" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M 0 0 L 6 3 L 0 6 z" fill="#15803d"/>
     </marker>
+    <marker id="arroworange" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 6 3 L 0 6 z" fill="#ea580c"/>
+    </marker>
   </defs>
 
   <!-- KV scratchpad ↔ KCE -->
   <line x1="230" y1="284" x2="325" y2="225" stroke="#15803d" stroke-width="1" stroke-dasharray="2,2"/>
+
+  <!-- ============ TIU feedback arrows (NEW 2026-05-14, dashed orange) ============ -->
+  <!-- VecU softmax → TIU: per-attention-pass broadcast of per-block cumulative softmax weight -->
+  <line x1="385" y1="280" x2="415" y2="216" stroke="#ea580c" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arroworange)"/>
+  <!-- TIU → KCE: per-block precision selector (high importance: 4.0 bpe; low: 3.0/2.0 bpe) -->
+  <line x1="400" y1="195" x2="391" y2="195" stroke="#ea580c" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arroworange)"/>
+  <!-- TIU → MSC: H2O-style heavy-hitter eviction policy -->
+  <path d="M 400 215 Q 350 270 310 335" fill="none" stroke="#ea580c" stroke-width="1" stroke-dasharray="3,2" marker-end="url(#arroworange)"/>
+  <!-- TIU feedback legend marker -->
+  <text x="463" y="172" text-anchor="end" font-family="-apple-system" font-size="9" fill="#ea580c" font-style="italic">⤺ feedback</text>
 
   <!-- die size dimension annotations -->
   <line x1="60" y1="585" x2="560" y2="585" stroke="#6b7280" stroke-width="0.5"/>
@@ -661,7 +680,8 @@ The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V fact
 <thead><tr><th>Date</th><th>Milestone</th></tr></thead>
 <tbody>
 <tr><td>2026-04</td><td>v0.3 architecture spec — initial floorplan</td></tr>
-<tr><td>2026-05-14</td><td>v0.3 audit — 8 bugs fixed (see STATUS.md §4); repo restructured to single-arch focus</td></tr>
+<tr><td>2026-05-14</td><td>v0.3 audit — 8 bugs fixed (see STATUS.md §4); repo restructured to single-arch focus; <strong>TIU block added</strong> (Phase 0.3); HIF revised USB-C 2.0 → PCIe Gen3 x1</td></tr>
+<tr><td>2026-05-17</td><td>Chamber tooling framework v0.1 — <code>lambda-stratus</code> + generic launchers + stub <code>mate/stratus/project.tcl</code>; smoke test passed on ae03ut01. See <code>docs/tools-overview.md</code>.</td></tr>
 <tr><td>2026-05</td><td>IMEC + Muse shuttle quotes</td></tr>
 <tr><td>2026-06</td><td>v1 vs v2 decision; LPDDR PHY quote in</td></tr>
 <tr><td>2026-07</td><td>Primary demo model chosen; Python golden model started</td></tr>

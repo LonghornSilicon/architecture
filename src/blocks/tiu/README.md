@@ -34,8 +34,8 @@
 - `importance_sram.h` — 256 B SRAM macro (compiler-generated 1-port HD)
 - `accumulator.h` — 16-bit saturating accumulator per block
 - `csr.h` — mode + threshold register file
-- `tb/` — testbench validating bit-exact against Python golden (`../../golden/tiu.py`)
-- `stratus.tcl`
+- `tb/` — testbench validating bit-exact against Python golden (`../../golden/tiu.py`; peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))
 
 ## Open design questions
 

@@ -221,7 +221,7 @@ Per the approved plan at `~/.claude/plans/proud-yawning-hopcroft.md`. Research-f
 | **B. Attention/FFN deep dive** | Read FA-3, MLA, PagedAttention, GQA, KV survey, KVQuant, TurboQuant, FlashInfer, TIU paper carefully; populate the literature audit | [`../docs/literature_audit.md`](literature_audit.md) sections filled in (10 done, 10 stubs) + the 8 open spec items in §3.3 closed |
 | **C. Etched patent** | Focused reading + UT tech transfer conversation | Defensive non-infringement note in [`../arch.yml`](../arch.yml) + clearance |
 | **D. arch.yml v0.4 consolidation** | Apply A+B+C outputs as a single coherent revision; re-validate; bump version metadata | [`../arch.yml`](../arch.yml) v0.4 + change-log entry in [`../STATUS.md`](../STATUS.md) |
-| **E. HLS implementation** | Stratus C++ + Python golden per block; MatE PE first (long pole), then KCE, then TIU + VecU, then MSC + LSU + HIF | All `src/blocks/*/{<block>.h,<block>.cpp,golden/,tb/,stratus.tcl}` populated; bit-exact verification |
+| **E. HLS implementation** | Stratus C++ + Python golden per block; MatE PE first (long pole), then KCE, then TIU + VecU, then MSC + LSU + HIF | All `src/blocks/*/{<block>.h,<block>.cpp,golden/,tb/,stratus/project.tcl}` populated; bit-exact verification |
 
 ---
 

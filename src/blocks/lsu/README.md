@@ -30,5 +30,5 @@ Compiler emits the schedule once per model; chip walks it forever. The host load
 - `decoder.h` — 32-inst decoder
 - `regfile.h` — 16 × 32b GPR
 - `dispatcher.h` — three-lane issue logic
-- `tb/` — testbench (runs example schedules)
-- `stratus.tcl`
+- `tb/` — testbench (runs example schedules; peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))

@@ -29,5 +29,5 @@
 - `kce.h`, `kce.cpp` — top-level Stratus entity
 - `hadamard16.h` — 16-pt Walsh-Hadamard butterfly (parameterizable)
 - `codebook.h` — Lloyd-Max 8-centroid classifier + bit-pack
-- `tb/` — testbench validating bit-exact against Python golden
-- `stratus.tcl`
+- `tb/` — testbench validating bit-exact against Python golden (peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))

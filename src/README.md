@@ -20,8 +20,9 @@ src/
 │   ├── <block>/
 │   │   ├── <block>.h         ← Stratus-synthesizable C++ header
 │   │   ├── <block>.cpp       ← Implementation
-│   │   ├── tb/               ← C++ testbench (cycle-accurate)
-│   │   ├── stratus.tcl       ← Stratus HLS script
+│   │   ├── tb/               ← C++ testbench (peer of stratus/, survives tool changes)
+│   │   ├── stratus/          ← Stratus HLS project subdir
+│   │   │   └── project.tcl   ← define_hls_module + define_hls_config targets
 │   │   └── README.md
 └── tests/                    ← Cross-block integration tests
 ```

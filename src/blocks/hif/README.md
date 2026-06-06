@@ -34,8 +34,8 @@ JTAG TAP pins separate from PCIe lanes; cost is in the I/O ring (already account
 - `csr.h` — CSR register file (mapped into BAR0 of PCIe config space)
 - `doorbell.h` — 16-deep command queue
 - `jtag.h` — JTAG TAP + scan chain
-- `tb/` — testbench
-- `stratus.tcl`
+- `tb/` — testbench (peer of `stratus/`)
+- `stratus/project.tcl` — Stratus HLS project (canonical syntax in [`../../../docs/tools-overview.md`](../../../docs/tools-overview.md))
 
 ## Vendor IP integration
 

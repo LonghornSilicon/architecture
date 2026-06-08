@@ -64,15 +64,20 @@ Three ground-truth facts about this chamber, all confirmed by a live debug sessi
 
 Diagnostic implication baked into `chamber-diagnose` v0.4: the tool-availability check is now **load-then-test** (`module load <spec>` → `command -v <binary>`), not pre-load `command -v` (which always fails before the autofs trigger).
 
-### 2. Tools live on COMPUTE nodes, not the login node
+### 2. Run tools on COMPUTE nodes — but the autofs maps reach login too
 
-The login node (e.g. `ae03ut01`) carries only the heavy interactive tools (Virtuoso + vManager). The **digital + sim tools** (Stratus, Genus, Innovus, Xcelium, Pegasus, SSV, Verisium) automount on **compute nodes** reached via:
+**Refined 2026-06-06 (post-v0.4.1).** The original framing here read "tools live on compute nodes, not login" — empirical evidence (live login-node session on `ae03ut01`) shows that's over-strong. The login node CAN autofs-mount the digital + sim tools just like compute does: `ls /apps/INNOVUS211/21` enumerates all nine 21.x leaf installs cold from `ae03ut01`, and `module load innovus/211/21.18.000` triggers the same autofs mount + binary resolution path that compute uses. The dirs disappear after the standard autofs idle timeout (5-10 min) on either node class — same kernel behavior.
 
-```csh
-qsh -q normal.q -now n -V
-```
+So the actual rule is **scheduling policy + farm shape**, not file availability:
 
-The original `lambda-innovus mate gui` failure earlier in v0.3 was a login-node run, not a launcher bug. **Every launcher in v0.4 detects this** via `lambda_require_tool` (in `tools/lib/lambda-run.sh`): if a module loads but the binary doesn't appear on PATH, the error explicitly names the LOGIN-vs-compute distinction and prints the `qsh` command.
+| Why you still `qsh -q normal.q -now n -V` for real work | Concrete reason |
+|---|---|
+| **Scheduling protection** | Compute nodes are scheduled — your job has guaranteed CPU/RAM. The login node is shared; a heavy synth degrades everyone's interactive session. |
+| **Resource sizing** | Login is sized for editing + terminal + light tools (Virtuoso + vManager is the "heavy" tier here). 16-thread Innovus runs want compute hardware. |
+| **License routing** | Some Cadence license features prefer compute-class clients via the chamber's lic-server policy. |
+| **Heterogeneous farm** | The compute farm itself is non-uniform — `ip-10-2-6-30` lacks `/apps/INNOVUS*` per the autofs map on that node. `lambda_require_tool` surfaces this with a clear hint; exit and re-qsh to a different node. |
+
+The `lambda-innovus mate gui` failure cited in the original v0.3 finding was almost certainly a different root cause (modulefile path, autofs idle between probe and launch, license routing) misattributed to "login doesn't carry the tool." The launcher's `lambda_require_tool` check (in `tools/lib/lambda-run.sh`) is still the right safety net — when a `module load` succeeds but the binary doesn't land on PATH, it points you to `qsh -q normal.q -now n -V`, which works whether the original failure was login-vs-compute, a heterogeneous-farm gap, or an idle-timed-out mount that needs a fresh trigger.
 
 ### 3. Module pins: three-level leaves matched to the installed family
 

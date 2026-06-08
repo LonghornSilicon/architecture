@@ -63,8 +63,13 @@ EOF
 
     # The real test: did the binary actually land on PATH? On an autofs chamber,
     # PATH-scanning the just-appended /apps/<TOOL>/bin is what triggers the
-    # automount. If that fails, we're almost certainly on a login node that
-    # doesn't carry the digital tools.
+    # automount. If that fails, either this node's autofs map lacks $module_spec
+    # (heterogeneous farm — e.g. ip-10-2-6-30 has no /apps/INNOVUS*), the mount
+    # idled out between load and probe, or the modulefile points at a path the
+    # backing store doesn't serve here. v0.4.1 refinement: this is NOT a clean
+    # LOGIN-vs-compute split — login (ae03ut01) can autofs-mount the digital
+    # tools too. qsh-ing to a fresh compute shell is still the right fix in
+    # almost all cases (scheduling protection + heterogeneous-farm reshuffle).
     if ! command -v "$binary" >/dev/null 2>&1; then
         local host="${HOSTNAME:-$(hostname 2>/dev/null || echo unknown)}"
         local node_class="unknown"
@@ -75,11 +80,12 @@ EOF
         cat >&2 <<EOF
 ERROR: '$binary' not resolvable after loading $module_spec.
 Host:  $host  ($node_class)
-       /apps/<TOOL> is autofs — a module load + PATH touch is what mounts it.
-       This usually means you're on a LOGIN node (carries only Virtuoso +
-       vManager), not a compute node (which carries the digital + sim tools).
+       /apps/<TOOL> is autofs — \`module load\` + PATH-scan triggers the mount.
+       This node's autofs map either lacks $module_spec, the mount idled out
+       (5-10 min default), or the modulefile points at a path not served here.
+       The compute farm is heterogeneous (e.g. ip-10-2-6-30 has no INNOVUS).
 
-Fix:   qsh -q normal.q -now n -V       # get a compute shell, then retry.
+Fix:   qsh -q normal.q -now n -V       # get a fresh compute shell, then retry.
        (Use 'lambda-diagnose' for a full chamber probe.)
 EOF
         return 1

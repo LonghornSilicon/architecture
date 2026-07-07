@@ -5,7 +5,7 @@ Bit-accurate Python reference implementations for every Lambda block. The HLS C+
 ## Files (to be written)
 
 - `mate.py` — MatE PE microarchitecture + 8×8 systolic array + INT8×INT4 + INT24 K-axis acc. Both dataflow modes (weight-stationary, output-stationary for Q·K^T).
-- `kce.py` — KVE ChannelQuant reference: per-channel INT4 K (grouped G=128) + per-token INT4 V + static top-k FP16 outlier lane; tiers CQ-8/CQ-4/CQ-4+. *(File name kept for HLS continuity. The prior "16-pt Walsh-Hadamard + Lloyd-Max 8-centroid + bit-pack, 5 CSR modes" reference is legacy pre-pivot, pending re-derivation.)*
+- `kce.py` — KVE ChannelQuant reference: per-channel INT4 K (grouped G=128, D FP16 scales) + per-token INT4 V + static top-k (k=2) FP16 outlier lane via ROM mask; decompress = per-channel `INT4·FP16`; tiers CQ-8/CQ-4/CQ-4+. *(File name kept for HLS continuity; ChannelQuant is not codebook-based.)*
 - `vecu.py` — 8-lane FP/BF SIMD + exp/rsqrt/sigmoid LUTs + online softmax + RoPE.
 - `msc.py` — 128-entry block table + DMA FSM + LPDDR timing model (high-level).
 - `lsu.py` — 32-inst decoder + 3-lane dispatch + register file.

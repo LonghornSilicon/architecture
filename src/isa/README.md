@@ -28,4 +28,4 @@ See `STATUS.md` §7 for the planned cross-cutting work that touches the ISA desi
 
 - Whether to fuse `ISSUE_MAT_E` + `ISSUE_VEC_U` into a single FA-3 macro-op
 - Whether to add a runtime precision-mode field (cf. Chaithu's adaptive-precision controller) or leave precision selection entirely to the static schedule
-- Whether to expose the KVE ChannelQuant tier select (CQ-8 / CQ-4 / CQ-4+) as a per-layer CSR or per-tile micro-field *(legacy drafts framed this as a TurboQuant / asymmetric-K3V2 / FP4 mode select; pending re-derivation)*
+- Whether to expose the KVE ChannelQuant tier select (CQ-8 / CQ-4 / CQ-4+) as a per-layer CSR or per-tile micro-field

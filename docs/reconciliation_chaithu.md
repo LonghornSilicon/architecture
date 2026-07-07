@@ -7,7 +7,7 @@
 
 ---
 
-> **Codec-of-record note (2026-06-22 pivot, added after this doc was written):** Lambda's KV codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; KV Cache Engine / KVE block; full block in the `kv-cache-engine` repo). This **supersedes the TurboQuant premise** that much of this reconciliation is argued around. The TurboQuant-specific reasoning below (Walsh-Hadamard write-time outlier flattening, Lloyd-Max codebook, INT8×INT3 compressed-domain scoring, 4.0 bpe) predates the pivot and is retained as historical context — it is pending human re-derivation and should not be read as Lambda's current codec. TurboQuant is cited prior work only.
+> **Codec-of-record note:** Lambda's KV codec of record is **ChannelQuant** (per-channel INT4 K grouped G=128 + per-token INT4 V + static top-k k=2 FP16 outlier lane; KV Cache Engine / KVE block; full block RTL complete through Sky130 sign-off in the `kv-cache-engine` repo; recipe follows KIVI, ICML 2024 / KVQuant, 2024). The premise argument below has been migrated to ChannelQuant: outliers are absorbed by per-channel scales + a static FP16 outlier lane (not Hadamard rotation), and keys are dequantized per-channel before scoring (no compressed-domain read path). TurboQuant is cited prior work only; its pure history is on the `legacy/turboquant` branch. The reconciliation *conclusion* (Lambda's static codec vs Chaithu's run-time precision gate) is unchanged.
 
 ## What this document is
 
@@ -47,17 +47,17 @@ Lambda commits to a different quantization premise than your Precision Controlle
 
 **Your Precision Controller's premise:** outlier attention tiles need higher precision (FP16) to retain quality; route them dynamically per-tile based on the entropy-equivalent ratio `max(|s|) × N > Σ(|s|) × 10`. The MAC Array has both an INT8 path and an FP16 path; tiles flow to whichever the precision controller selects.
 
-**Lambda's premise:** rotation-codebook compression (TurboQuant, arXiv 2504.19874) handles outlier attention tiles **at write-time**, not at read-time. Specifically:
+**Lambda's premise (ChannelQuant, codec of record):** outliers are handled **structurally at compress-time** by the codec, not routed per-tile at read-time. Specifically:
 
-- Each K/V vector is multiplied by a Walsh-Hadamard butterfly before compression. The butterfly *spreads* outlier coordinates roughly evenly across all dimensions — flattening the distribution toward Gaussian/Beta.
-- After the butterfly, every coordinate looks roughly uniform. A single 8-centroid Lloyd-Max codebook (3-bit indices) is then optimal across all coordinates without per-tile precision routing.
-- The result: compressed K and V have *no remaining outliers*. Attention scoring against them at INT8 (Q) × INT3 (compressed K) accumulated in INT24 is quality-neutral on LongBench, Needle-in-Haystack, and similar.
+- Keys are quantized **per channel** (grouped G=128, D per-channel FP16 scales) to INT4, so each channel's dynamic range is captured by its own scale — a large-magnitude channel does not force the whole tile to a coarse quantizer.
+- The **static top-k (k=2) outlier channels**, selected by a calibrated ROM mask, are kept in FP16 verbatim. The largest-magnitude channels — the ones that would otherwise degrade INT4 — never lose precision.
+- Values are quantized per token (INT4; INT8 in the CQ-8 tier). Decompression is per-channel `INT4·FP16` (+ FP16 replay for the outlier channels), applied **before** the Q·K^T score matmul.
 
-**These two architectures solve different problems.** Your Precision Controller solves "how do I route per-tile precision at run-time when outliers cause INT8 quality to degrade?" Lambda's approach solves "how do I eliminate the outliers entirely at write-time so INT8 always works?"
+**These two architectures solve different problems.** Your Precision Controller solves "how do I route per-tile precision at run-time when outliers cause INT8 quality to degrade?" ChannelQuant solves "how do I absorb the outliers into the codec (per-channel scales + a static FP16 outlier lane) so the common path is always low-bit?"
 
-If TurboQuant works as advertised (and the published evidence — three independent OSS implementations, ICLR'26 acceptance — suggests it does), the per-tile precision gate is unnecessary work: the gate would rarely fire, and when it did the FP16 fallback path is silicon area we paid for but didn't need.
+The published ChannelQuant recipe (KIVI, ICML 2024; KVQuant, 2024) and Lambda's measured results — HellaSwag acc_norm within ~0.4–0.8 pt of FP16 at CQ-4+ on Qwen2-0.5B/1.5B — say the per-tile precision *gate* is unnecessary work: the outlier handling is static (a calibrated channel mask), not a run-time gate, and there is no FP16 fallback tile path to pay for.
 
-**Specifically for Lambda's MatE:** there is no FP16 multiplier. The systolic array is INT8 × INT4 (for weight matmuls) and INT8 × INT3 (for attention scoring against compressed K). All FP16 work is in VecU (online softmax, RMSNorm, RoPE, SiLU) — the programmable SIMD where FP16 is unavoidable for transcendentals. The MatE fabric never sees an FP16 operand.
+**Specifically for Lambda's MatE:** there is no FP16 multiplier. The systolic array is INT8 × INT4 for weight matmuls; for attention scoring, the KVE dequantizes K per-channel to FP16 *before* the array, so MatE scores Q (INT8) against dequantized K. There is no compressed-domain / raw-index read path. All the remaining FP16 work is in VecU (online softmax, RMSNorm, RoPE, SiLU) — the programmable SIMD where FP16 is unavoidable for transcendentals.
 
 **On the accumulator** (a separate but related fix): your spec uses INT16 accumulators in the MAC Array. Lambda's earlier draft did too — and we caught it as a bug on 2026-05-14. INT8 × INT4 produces an 11-bit signed product; reducing K=128 (head_dim) sums needs 18 bits signed, which overflows INT16 (max ±32767) after ~64 accumulations in the worst case. Lambda's MatE now uses an INT16 partial-product register inside each PE plus an **INT24 K-axis accumulator** at the column output. For your MAC Array, the same fix would apply.
 
@@ -67,8 +67,8 @@ If TurboQuant works as advertised (and the published evidence — three independ
 
 **Adopted into Lambda's `arch.yml` (Phase 0 changes, 2026-05-14):**
 
-- **ACU naming.** Lambda's top-level decomposition now groups MatE + VecU + KCE-mini under "ACU" (Attention Compute Unit), mirroring your framework. The internal block IDs stay (HLS continuity), but the umbrella name comes from your work.
-- **TIU block.** Real silicon now. Modeled on arXiv 2604.04722 ("Adaptive KV-Cache Quantization for Lightweight On-Device LLMs") — entropy-based per-block precision allocation. Per-block (16-token) 16-bit importance accumulator (256 B SRAM total), updated by VecU during softmax, consumed by MSC (eviction) and KCE-mini (per-block precision). 0.03 mm² total. Your TIU framework gets a concrete on-silicon expression.
+- **ACU naming.** Lambda's top-level decomposition now groups MatE + VecU + KVE under "ACU" (Attention Compute Unit), mirroring your framework. The internal block IDs stay (HLS continuity), but the umbrella name comes from your work.
+- **TIU block.** Real silicon now. Modeled on arXiv 2604.04722 ("Adaptive KV-Cache Quantization for Lightweight On-Device LLMs") — entropy-based per-block precision allocation. Per-block (16-token) 16-bit importance accumulator (256 B SRAM total), updated by VecU during softmax, consumed by MSC (eviction) and the KVE (per-block ChannelQuant tier selection). 0.03 mm² total. Your TIU framework gets a concrete on-silicon expression.
 
 **Adopted into Lambda's `src/` (Phase E HLS work, to begin after Phases A/B/C/D):**
 
@@ -79,10 +79,10 @@ If TurboQuant works as advertised (and the published evidence — three independ
 
 **Not adopted:**
 
-- Runtime precision controller as an architectural primitive (TurboQuant subsumes the problem).
-- FP16 MAC path in MatE (area we don't have at 4 mm²; not needed under TurboQuant).
-- Four-block decomposition (ACU/KVCE/TIU/MHC) as a substitute for Lambda's seven-block structure (MatE/VecU/KCE-mini/MSC/LSU/HIF/TIU). Lambda absorbs the *naming convention*, keeps its own block split for HLS reasons.
-- Compression-algorithm uncertainty (your KVCE doc lists GEAR/RotateKV/Lexico as candidates). Lambda has decided: TurboQuant. ICLR'26, three OSS implementations, quality-neutral at 3.5 bpe (32-pt) / 4.0 bpe (Lambda's 16-pt). KCE-mini block is locked.
+- Runtime precision controller as an architectural primitive (ChannelQuant's static per-channel scales + FP16 outlier lane subsume the problem).
+- FP16 MAC path in MatE (area we don't have at 4 mm²; not needed — keys are dequantized to FP16 by the KVE before the array, not multiplied in a compressed form).
+- Four-block decomposition (ACU/KVE/TIU/MHC) as a substitute for Lambda's seven-block structure (MatE/VecU/KVE/MSC/LSU/HIF/TIU). Lambda absorbs the *naming convention*, keeps its own block split for HLS reasons.
+- Compression-algorithm uncertainty (your KVCE doc lists GEAR/RotateKV/Lexico as candidates). Lambda has decided: **ChannelQuant** (recipe following KIVI, ICML 2024 / KVQuant, 2024), ~3.8× at ~4 bits/value, near-lossless at the CQ-4+ tier. The KVE block is the codec of record; TurboQuant is cited prior work only.
 
 ---
 
@@ -90,9 +90,9 @@ If TurboQuant works as advertised (and the published evidence — three independ
 
 Two reasonable paths forward; both are good.
 
-**Path 1 — Align your work with Lambda's `arch.yml`.** Reshape `adaptive-precision-attention` against Lambda's seven-block decomposition. Your ACU work becomes Lambda's MatE + VecU + KCE-mini (Lambda's `src/blocks/{mate,vecu,kce}/`). Your TIU spec becomes the basis for `src/blocks/tiu/`. Your KVCE/MHC work merges with Lambda's MSC. The Precision Controller doesn't have a Lambda analog (deliberately) — but your ISA + reference-model + verification methodology applies everywhere else. The team gets one canonical chip target.
+**Path 1 — Align your work with Lambda's `arch.yml`.** Reshape `adaptive-precision-attention` against Lambda's seven-block decomposition. Your ACU work becomes Lambda's MatE + VecU + KVE (Lambda's `src/blocks/{mate,vecu,kce}/`; the `kce/` dir name is kept for HLS continuity). Your TIU spec becomes the basis for `src/blocks/tiu/`. Your KVCE/MHC work merges with Lambda's MSC. The Precision Controller doesn't have a Lambda analog (deliberately) — but your ISA + reference-model + verification methodology applies everywhere else. The team gets one canonical chip target.
 
-**Path 2 — Fork your repo as an alternative architecture.** `adaptive-precision-attention` continues as a separate architectural candidate for a different chip target (e.g., a node where FP16 area is cheaper; a workload where outliers don't compress under Hadamard; a teaching artifact). Lambda's repo and yours diverge cleanly. The team has two reference architectures, each pushing its own hypothesis. This is a publishable contrast.
+**Path 2 — Fork your repo as an alternative architecture.** `adaptive-precision-attention` continues as a separate architectural candidate for a different chip target (e.g., a node where FP16 area is cheaper; a workload where outliers don't compress under per-channel quantization; a teaching artifact). Lambda's repo and yours diverge cleanly. The team has two reference architectures, each pushing its own hypothesis. This is a publishable contrast.
 
 Both are legitimate paths. The choice depends on your preference: do you want the Precision Controller to live as an on-silicon primitive, or as a methodological contribution that lifts up the rest of Lambda's design? Either is a real research first.
 
@@ -104,10 +104,10 @@ We'd love to talk through it. Faculty advisor will schedule a 30-min conversatio
 
 **Locked:**
 - 4 mm² die at TSMC 16nm FinFET (N16FFC) via IMEC mini@sic 2.0
-- W4 weights / A8 activations / ChannelQuant KV codec (KVE; per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane)
-- 8×8 MatE INT8×INT4 (no FP16)
+- W4 weights / A8 activations / ChannelQuant KV codec (KVE; per-channel INT4 K grouped G=128 + per-token INT4 V + static top-k k=2 FP16 outlier lane)
+- 8×8 MatE INT8×INT4 (no FP16; K dequantized per-channel by the KVE before scoring)
 - 8-lane VecU FP16/BF16 (transcendentals + online softmax)
-- KVE ChannelQuant *(legacy "16-pt Walsh-Hadamard + Lloyd-Max" description pre-pivot; pending re-derivation)*
+- KVE ChannelQuant (recipe follows KIVI/KVQuant; block RTL complete through Sky130 sign-off; 16nm PD numbers TBD)
 - MSC PagedAttention 128-entry block table (canonical Memory Hierarchy Controller / MHC)
 - LSU 32-instruction in-order RISC
 - HIF PCIe Gen3 x1 on M.2 form factor (revised 2026-05-14 from USB-C 2.0)
@@ -146,5 +146,5 @@ Either way, your work has shaped Lambda. The ACU naming and the TIU block both c
 - Lambda visual floorplan: `floorplan.html`
 - Lambda dataflow walkthrough: `dataflow_walkthrough.md`
 
-TurboQuant paper for the quantization premise: arXiv 2504.19874 (ICLR'26).
+ChannelQuant recipe basis: KIVI (Liu et al., ICML 2024) / KVQuant (Hooper et al., 2024). TurboQuant (arXiv 2504.19874, ICLR'26) is cited prior work only.
 TIU paper: arXiv 2604.04722.

@@ -6,7 +6,7 @@
   author  = {Ashkboos, Saleh and others},
   journal = {arXiv preprint arXiv:2504.19874},
   year    = {2025},
-  note    = {Accepted to ICLR 2026}
+  note    = {Accepted to ICLR 2026. Cited as prior work only; not Lambda's codec of record (which is ChannelQuant, following KIVI/KVQuant).}
 }
 
 @inproceedings{flashattention,
@@ -60,11 +60,20 @@
   year    = {2023}
 }
 
-@article{kvquant,
-  title   = {{KVQuant}: Towards 10 Million Context Length {LLM} Inference with {KV} Cache Quantization},
-  author  = {Hooper, Coleman and Kim, Sehoon and Mohammadi, Hiva and Mahoney, Michael W. and Shao, Yakun Sophia and Keutzer, Kurt and Gholami, Amir},
-  journal = {arXiv preprint arXiv:2401.18079},
-  year    = {2024}
+@inproceedings{kvquant,
+  title     = {{KVQuant}: Towards 10 Million Context Length {LLM} Inference with {KV} Cache Quantization},
+  author    = {Hooper, Coleman and Kim, Sehoon and Mohammadi, Hiva and Mahoney, Michael W. and Shao, Yakun Sophia and Keutzer, Kurt and Gholami, Amir},
+  booktitle = {Advances in Neural Information Processing Systems (NeurIPS)},
+  year      = {2024},
+  note      = {arXiv:2401.18079. Recipe basis for Lambda's ChannelQuant KV codec (per-channel + dense-and-sparse outlier handling).}
+}
+
+@inproceedings{kivi,
+  title     = {{KIVI}: A Tuning-Free Asymmetric 2bit Quantization for {KV} Cache},
+  author    = {Liu, Zirui and Yuan, Jiayi and Jin, Hongye and Zhong, Shaochen and Xu, Zhaozhuo and Braverman, Vladimir and Chen, Beidi and Hu, Xia},
+  booktitle = {International Conference on Machine Learning (ICML)},
+  year      = {2024},
+  note      = {arXiv:2402.02750. Recipe basis for Lambda's ChannelQuant KV codec (per-channel keys, per-token values). Author list and arXiv ID taken from the published paper; verify before camera-ready.}
 }
 
 @article{kv_survey,
@@ -373,7 +382,7 @@
   author       = {{NVIDIA Corporation}},
   year         = {2024},
   howpublished = {NVIDIA developer documentation},
-  note         = {Source of the NVFP4 E2M1 levels that Lambda's KCE-mini supports as an alternative codebook mode}
+  note         = {Cited for low-bit numeric-format context (NVFP4 / Blackwell)}
 }
 
 % ---- Recent KV-cache compression survey (deep-read source) ----

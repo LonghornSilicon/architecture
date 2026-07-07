@@ -40,9 +40,9 @@ The paper is organized as IEEEtran conference format, 6–9 pages double-column:
 | Section | Contents |
 |---|---|
 | Abstract | What Lambda is, three contributions, key numbers |
-| 1. Introduction | The 3–5 B on-device deployment regime; the open-source gap; contributions |
-| 2. Background | FlashAttention, PagedAttention, KV compression, attention-weight eviction |
-| 3. Architecture | Block-by-block: ACU (MatE/VecU/KCE-mini), MSC, LSU, **TIU**, HIF |
+| 1. Introduction | The small-model (≤1.5 B, validated on Qwen2-1.5B) on-device deployment regime; the open-source gap; contributions |
+| 2. Background | FlashAttention, PagedAttention, KV compression (KIVI/KVQuant), attention-weight eviction |
+| 3. Architecture | Block-by-block: ACU (MatE/VecU/KVE ChannelQuant), MSC, LSU, **TIU**, HIF |
 | 4. Dataflow & Quantization | Token-through-chip walk; why no FP16 multiplier in MatE |
 | 5. Implementation | Process, area accounting, power, pre-RTL audit |
 | 6. Performance | Decode tok/s vs model size; LPDDR5X-vs-LPDDR4X PHY tradeoff |
@@ -74,7 +74,9 @@ In rough order of fit:
 
 ## Citation correctness
 
-Every reference in `lambda.bib` is a real, arXiv-traceable or proceedings-published source. The work has zero placeholder citations. The TurboQuant paper (arXiv 2504.19874) is the load-bearing algorithmic citation; FlashAttention-3 (arXiv 2407.08608) is the load-bearing online-softmax citation; vLLM PagedAttention (arXiv 2309.06180) is the load-bearing KV-management citation. The adaptive-precision-KV paper (arXiv 2604.04722) grounds the TIU design.
+Every reference in `lambda.bib` is a real, arXiv-traceable or proceedings-published source. The KV codec of record is **ChannelQuant**, whose load-bearing algorithmic citations are KIVI (Liu et al., ICML 2024) and KVQuant (Hooper et al., NeurIPS 2024); TurboQuant (arXiv 2504.19874) is retained as cited prior work only. FlashAttention-3 (arXiv 2407.08608) is the load-bearing online-softmax citation; vLLM PagedAttention (arXiv 2309.06180) is the load-bearing KV-management citation. The adaptive-precision-KV paper (arXiv 2604.04722) grounds the TIU design.
+
+> Note: the KIVI bib entry's author list / arXiv ID and the KVQuant venue (NeurIPS 2024) use conservative published values; verify exact fields before camera-ready. Physical PPA numbers for the KVE (KV Cache Engine) at N16FFC are marked pending re-measurement for ChannelQuant in the paper.
 
 ## Companion repository
 

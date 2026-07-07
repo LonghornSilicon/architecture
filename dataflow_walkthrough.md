@@ -1,6 +1,6 @@
 # Lambda — Unit-by-Unit Dataflow Walkthrough
 
-> **Codec-of-record note (2026-06-22 pivot):** the KV codec of record is now **ChannelQuant** (per-channel INT4 keys, grouped G=128; per-token INT4 values; static top-k FP16 outlier-channel lane; ~3.8× at ~4 bits/value), packaged as the **KV Cache Engine (KVE)** — full block in the `kv-cache-engine` repo. **Stage 7 below still describes the legacy TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max datapath**; that microarchitecture and its numbers predate the pivot and are pending human re-derivation for ChannelQuant. Likewise the Llama-3.2-3B running example predates the pivot (canonical target is up to 1.5B, validated on Qwen2-1.5B); its per-model dimensions are retained here only as a teaching walkthrough and are pending re-derivation.
+> **Codec-of-record note:** the KV codec of record is **ChannelQuant** (per-channel INT4 keys, grouped G=128, D per-channel FP16 scales; per-token INT4 values; static top-k (k=2) FP16 outlier-channel lane; ~3.8× at ~4 bits/value), packaged as the **KV Cache Engine (KVE)** — full block RTL complete through Sky130 sign-off in the `kv-cache-engine` repo. Stage 7 below walks the ChannelQuant compress/decompress datapath. The Llama-3.2-3B running example is a legacy teaching example (canonical target is up to 1.5B, validated on Qwen2-1.5B); its per-model *throughput/capacity numbers* are TBD — pending re-derivation for ChannelQuant / Qwen2-1.5B — and are kept here only to make the walkthrough concrete.
 
 A guided tour of every block in Lambda, walked through in the order data actually flows during a decode token. Each block becomes concrete as it appears in the journey of one token through one layer.
 
@@ -18,7 +18,7 @@ A guided tour of every block in Lambda, walked through in the order data actuall
 
 When you slot Lambda's M.2 2280 card into your laptop or dev board's M.2 slot, the very first block to wake up is the **HIF (Host Interface)**. It's a PCIe Gen3 x1 endpoint — the M.2 connector wires 4 PCIe lanes by spec, but Lambda's on-die PHY drives only x1, so PCIe link training negotiates the link down to x1 cleanly. Sustained throughput on the link is ~1 GB/s. Inside the chip, HIF sits at the perimeter of the die (a ~0.55 mm² block) and has three responsibilities at boot: enumerate as a PCIe endpoint on your host, expose a CSR (Configuration / Status Register) interface via PCIe BAR0 so the host driver can poke the chip's control registers, and provide a JTAG + scan-chain debug port on dedicated pins (separate from the PCIe lanes) for if something breaks.
 
-The host driver does two things over HIF: (1) writes ~3K instructions of microcode into the LSU's instruction RAM (this is the pre-compiled schedule for "run Llama-3.2-3B"), and (2) initiates a 1.5 GB DMA transfer of the W4-quantized weights from your laptop's RAM into the chip's external LPDDR5X package. At PCIe Gen3 x1 (~1 GB/s), that takes ~1.5 seconds — a one-time cost per power-on. After that, weights live off-chip in DRAM forever.
+The host driver does two things over HIF: (1) writes ~3K instructions of microcode into the LSU's instruction RAM (this is the pre-compiled schedule for "run Llama-3.2-3B"), and (2) initiates a 1.5 GB DMA transfer of the W4-quantized weights from your laptop's RAM into the chip's external LPDDR5X package. At PCIe Gen3 x1 (~1 GB/s), that takes ~1.5 seconds — a one-time cost per power-on. After that, weights live off-chip in the LPDDR5X package forever.
 
 Now the chip is armed. You type a prompt. The host writes a doorbell into one of HIF's 16 doorbell-queue entries. HIF asserts an interrupt. The LSU wakes up.
 
@@ -68,7 +68,7 @@ The other three SRAM banks deserve introduction now too, because MatE is about t
 
 - **`activation_buffer` (0.3 MB, 2-port)** — holds the input vector `act_buf` (the previous layer's output, residual-summed and norm'd). 2-port because MatE is going to read it while VecU writes the next iteration's update. ~0.26 mm².
 - **`kv_scratchpad` (0.4 MB, 1-port)** — the headline bank. Holds compressed K and V from the last several thousand tokens of this layer. We'll touch it later in this stage's attention step.
-- **`codebook_const_rom` (64 KB, 1-port read-only)** — the Lloyd-Max centroids, RoPE freq table, and exp/sigmoid/rsqrt LUTs. Read by KVE and VecU; never written. *(The Lloyd-Max centroids are legacy TurboQuant-era; the ChannelQuant codec of record does not use a codebook ROM — pending re-derivation.)*
+- **`codebook_const_rom` (64 KB, 1-port read-only)** — the ChannelQuant static top-k (k=2) outlier-channel mask, RoPE freq table, and exp/sigmoid/rsqrt LUTs. Read by KVE and VecU; never written. *(The directory/id name is kept for HLS continuity; there are no Lloyd-Max centroids — ChannelQuant is not codebook-based.)*
 
 Total on-chip SRAM: 0.8 MB across these four banks, ~0.71 mm² of die. KV-dominant by 50% intentionally — long-context decode is KV-bandwidth-bound; weight buffer just needs to hide LPDDR latency.
 
@@ -116,29 +116,31 @@ Why is VecU programmable instead of fixed-function for RoPE? Because the same SI
 
 ## Stage 7 — KVE compresses K and V into the scratchpad
 
-> **LEGACY (pre-2026-06-22 pivot):** this stage describes the TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max datapath. The codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane), and this whole stage's mechanics and PPA numbers are pending human re-derivation for ChannelQuant. Read the block name as **KVE (KV Cache Engine)**; the description below is retained for continuity only.
+LSU fires `ISSUE_KCE_COMP k → kv_scratchpad`. The **KVE (KV Cache Engine)** wakes up and runs the **ChannelQuant** codec. (Its 16nm area/power/Fmax are **TBD — pending re-measurement for ChannelQuant**; the block RTL is complete through Sky130 sign-off in the `kv-cache-engine` repo.)
 
-LSU fires `ISSUE_KCE_COMP k → kv_scratchpad`. The **KVE (KV Cache Engine)**, formerly the KCE block, wakes up — 0.08 mm² *(legacy TurboQuant-era area)*, described below in its legacy TurboQuant form.
-
-K is a 1024-element vector (8 KV heads × 128 dim) for this token in this layer. [Legacy TurboQuant path] KVE processes it in 16-element chunks. For each chunk:
+K is a 1024-element vector (8 KV heads × 128 dim, so head dim D=128) for this token in this layer. ChannelQuant quantizes **keys per channel**, so the KVE buffers a group of G=128 keys before it can quantize:
 
 ```
-[16-element vector, FP16]
+[G=128 key group, per channel, FP16]
         ↓
-[16-point Walsh-Hadamard butterfly]   4 stages × 8 add/sub pairs = 32 ops
-        ↓                              Mixes outliers across all coordinates
-[Nearest-centroid classifier]          7 comparators × 16 lanes = 112 comparators
-        ↓                              Picks closest of 8 codebook entries (3 bits each)
-[Bit-pack 16 × 3-bit = 48 bits]       Plus a 16-bit magnitude header per group
+[Per-channel amax over the group]      one running max per channel (D channels)
+        ↓
+[D per-channel FP16 scales]            scale_c = amax_c / 7   (INT4 signed range)
+        ↓
+[Per-channel INT4 quantize]            code_c = round(x_c / scale_c), clamped to INT4
+        ↓  (top-k=2 outlier channels held FP16 verbatim, selected by the ROM mask)
+[Unified per-channel SRAM record]      {tag, D×FP16 scale field, D×INT4 code}
         ↓
 [Write to kv_scratchpad]
 ```
 
-The Hadamard butterfly is just adds and subtracts arranged in a specific ±1 pattern that's mathematically equivalent to multiplying by an orthogonal rotation matrix. It "mixes" the input — if the original vector had one big outlier coordinate (a real problem in transformer KV), the butterfly spreads that outlier roughly evenly across all 16 coordinates, flattening the distribution. After the butterfly, every coordinate looks roughly Beta-distributed.
+The datapath **serializes one shared fp16 compute unit** (scale / quant / dequant — a single divide cone) across the D channels, rather than a wide parallel array. Two channels per group — the static **top-k, k=2 outliers** picked by a calibrated ROM mask — are *not* quantized: their FP16 values are kept in the outlier lane so the largest-magnitude channels never lose precision.
 
-The Lloyd-Max codebook is 8 centroids in a 64-byte ROM, optimal for the Beta distribution. Each coordinate independently picks the nearest centroid — that's a 3-bit index. We pack 16 of those plus a 16-bit FP16 group scale into 64 bits per 16 elements, hitting **4.0 bits/element effective → 4.0× compression vs FP16** (the trade-off for using 16-point instead of flagship's 32-point butterfly to save area; flagship gets 3.5 bpe at 32-pt for 4.57× compression).
+**Values** are quantized differently: **per token** (not per channel), INT4 in the CQ-4 tier (INT8 in CQ-8). So V is quantized as it streams, one token at a time, against a per-token scale.
 
-The killer property: zero multipliers on this entire path. Every operation is an add, comparator, or LUT lookup. That's why the whole block fits in 0.08 mm². The new compressed K (and immediately after, V) lands in `kv_scratchpad` next to all the previous tokens' KV from this same layer.
+Measured cost is **~4 bits/value** (≈ 4.13–4.38 depending on head dim D — for D=128 it's ≈ 4.13/4.22), i.e. **~3.8× compression vs FP16**, and it's near-lossless: HellaSwag acc_norm lands within ~0.4–0.8 pt of FP16 at the CQ-4+ tier. The tiers are **CQ-8** (per-token INT8 K+V), **CQ-4** (per-channel INT4 K / per-token INT4 V — primary), and **CQ-4+** (CQ-4 plus the k=2 FP16 outlier channels — near-lossless).
+
+The new compressed K (and immediately after, V) lands in `kv_scratchpad` next to all the previous tokens' KV from this same layer.
 
 ---
 
@@ -146,9 +148,9 @@ The killer property: zero multipliers on this entire path. Every operation is an
 
 Now we score. LSU dispatches `ISSUE_MAT_E qk_dot, q, k_compressed → scores`. MatE flips its dataflow CSR mode from weight-stationary to **output-stationary** — a single mode bit at the array boundary changes which inputs stay pinned and which stream.
 
-For Q·K^T, Q is fixed for this token but K varies across all the past tokens we're attending to. So we pin Q in the array (8 query heads' worth, one per row) and stream past K's through. As K's flow through, MatE reads from `kv_scratchpad`. But wait — `kv_scratchpad` holds *compressed* 3-bit K values, not 16-bit. How does that work?
+For Q·K^T, Q is fixed for this token but K varies across all the past tokens we're attending to. So we pin Q in the array (8 query heads' worth, one per row) and stream past K's through. As K's flow through, MatE reads from `kv_scratchpad`. But wait — `kv_scratchpad` holds K in *compressed* form (per-channel INT4 codes + FP16 scales), not raw FP16. How does that work?
 
-The trick is **compressed-domain attention scoring**. For a symmetric quantization scheme, the dot product `<Q, dequant(K_compressed)>` is mathematically equivalent to `dequant_scale × <Q, K_compressed>` — you can do the dot product in the *compressed* domain (with INT8 Q × INT3 K) and apply the scale once at the row sum. This means MatE never has to dequant K back to FP16 just to score it; the multipliers run on tiny 3-bit operands, partial products live in INT16 inside each PE, and the K-axis accumulator at the column edge is INT24 (sufficient for head_dim up to ~4K).
+Under ChannelQuant there is **no compressed-domain / raw-index scoring trick** — keys are **dequantized per-channel first**, then scored. On the read path the KVE reconstructs each channel as `INT4_code · FP16_scale` (and replays the k=2 outlier channels straight from their FP16 lane), producing an FP16 K vector. MatE then scores `Q (INT8) · dequantized K (FP16)`, partial products live in INT16 inside each PE, and the K-axis accumulator at the column edge is INT24. The per-channel dequant is cheap because the KVE serializes one shared fp16 unit across the D channels — the same divide cone used on the compress path, run in reverse.
 
 The output is the scores tensor — one number per past token in the context, per query head. For our running example with ~3000 tokens of accumulated context, that's ~3000 × 8 query-head scores.
 
@@ -181,7 +183,7 @@ Inside the same softmax tile loop, VecU broadcasts a side-channel signal to the 
 The TIU update is essentially free: it piggybacks on the softmax tile cadence with one extra microcode op per tile (~1 µop adds across 100 tiles = ~100 extra µops per layer). The cumulative importance per block is what downstream consumers use:
 
 - **MSC eviction policy** — when the kv_scratchpad fills, MSC asks TIU for the lowest-importance block and evicts that one (H2O-style heavy-hitter retention)
-- **KVE per-block precision** — when the KV Cache Engine re-compresses an evicted-and-recalled block, it queries TIU to decide the block's precision tier (higher importance retained at a higher tier; lower importance demoted). *(The specific 4.0/3.0/2.0 bpe tiers named here are legacy TurboQuant-era; ChannelQuant's CQ-8/CQ-4/CQ-4+ tier mapping is pending re-derivation.)*
+- **KVE per-block precision** — when the KV Cache Engine re-compresses an evicted-and-recalled block, it queries TIU to decide the block's ChannelQuant tier (higher importance retained at a higher tier — CQ-4+ or CQ-8; lower importance demoted to CQ-4).
 
 TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. It was added to Lambda on 2026-05-14 (Phase 0.3, after the Phase 0 audit decisions). Its `csr_modes` field lets the chip switch among `tiu_off` / `tiu_h2o` / `tiu_streaming_llm` / `tiu_adaptive_precision` — useful both as a research ablation knob and as a per-workload tuning lever.
 
@@ -189,7 +191,7 @@ TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. 
 
 ## Stage 10 — MatE does softmax · V → attention output
 
-LSU dispatches `ISSUE_MAT_E pv, softmax_scores · v_compressed → attn_out`. MatE goes back to normal weight-stationary dataflow but with V (compressed in scratchpad, dequantized on the fly through the KVE inverse path) as the streaming operand.
+LSU dispatches `ISSUE_MAT_E pv, softmax_scores · v_compressed → attn_out`. MatE goes back to normal weight-stationary dataflow but with V (per-token INT4 in scratchpad, dequantized on the fly through the KVE per-token dequant path — `INT4_code · scale`) as the streaming operand.
 
 Wait — in the FlashAttention-3 algorithm, `softmax_scores · V` was actually accumulated *during* the softmax tile loop in stage 9, not as a separate GEMM. So strictly speaking VecU and MatE are interleaving on a per-tile basis: tile-of-K arrives → MatE scores → VecU updates softmax + accumulates `O += weighted V`. When the last tile is consumed, `O` is the final attention output.
 
@@ -244,7 +246,7 @@ LSU ──▶ MSC ──▶ PHY ──▶ LPDDR ──▶ PHY ──▶ MSC ─�
 activation_buffer ◀── VecU (RoPE) ◀── MatE (QKV proj output) ──▶ KVE ──▶ kv_scratchpad
                                                                             │
                        MatE (output-stationary) ◀── kv_scratchpad ◀────────┘
-                       (Q·K^T compressed-domain)
+                       (Q·K^T; K per-channel dequant by KVE first)
                                 ▼
                        VecU (online softmax) ────▶ MatE (softmax·V) ──▶ attn_out
                                                                             │
@@ -257,6 +259,6 @@ activation_buffer ◀── VecU (RoPE) ◀── MatE (QKV proj output) ──�
                                                                             └── (loop)
 ```
 
-Eight blocks. One assembly line. Every cycle, somewhere on the chip, a multiplier is firing or a Hadamard is butterflying or a softmax is updating. The whole thing is choreographed by the LSU's pre-compiled program — no runtime decisions, no branch prediction, no surprises.
+Eight blocks. One assembly line. Every cycle, somewhere on the chip, a multiplier is firing or the KVE is dividing a channel by its scale or a softmax is updating. The whole thing is choreographed by the LSU's pre-compiled program — no runtime decisions, no branch prediction, no surprises.
 
 That's Lambda v2 from the inside out.

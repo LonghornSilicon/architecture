@@ -1,6 +1,6 @@
 # Lambda — Frontier Literature Audit (2026-05)
 
-> **Codec-of-record note (2026-06-22 pivot):** Lambda's KV codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; KV Cache Engine / KVE block; full block in the `kv-cache-engine` repo; recipe follows **KIVI (ICML 2024) / KVQuant (2024)**). Sections below that mark TurboQuant / 16-pt Hadamard as the "Lambda status: implemented" codec predate the pivot — treat TurboQuant as evaluated/cited prior work, not the chip's current codec. Those "Lambda status" lines are pending re-derivation.
+> **Codec-of-record note:** Lambda's KV codec of record is **ChannelQuant** (per-channel INT4 K grouped G=128 + per-token INT4 V + static top-k k=2 FP16 outlier lane; KV Cache Engine / KVE block; full block RTL complete through Sky130 sign-off in the `kv-cache-engine` repo; recipe follows **KIVI (ICML 2024) / KVQuant (2024)**). See §5 for the codec entry. TurboQuant (arXiv 2504.19874) is cited prior work only, not the chip's codec; 16nm PD numbers for the KVE are TBD — pending re-measurement.
 
 **Status:** living document. Grows as each Tier-1 paper is read carefully. Final form feeds Phase D consolidation into `arch.yml` and the visual representation.
 
@@ -84,7 +84,7 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 **What would it cost to add:** MSC block-table indexer change; KVE compresses latent vector instead of per-head K/V; MatE Q·K^T becomes Q × (latent → K decompress) which is an additional matmul step. ~+0.05 mm² across blocks; new CSR mode; ~30 verification tests.
 
-**Decision:** **Defer.** Too much arch surface change for the v0.4 spec. Worth revisiting for a v1.0 future Lambda revision IF DeepSeek-style MLA becomes the dominant 3-5B architecture (currently it's a 250B+ MoE technique).
+**Decision:** **Defer.** Too much arch surface change for the v0.4 spec. Worth revisiting for a v1.0 future Lambda revision IF DeepSeek-style MLA becomes the dominant small-model (≤1.5B-class) architecture (currently it's a 250B+ MoE technique).
 
 **Notes for visual rep:** "MLA = latent-space KV; Lambda's MSC assumes per-head KV; documented gap, not closed in v0.4."
 
@@ -94,7 +94,7 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 **Paper:** arXiv 2604.04722, "Adaptive KV-Cache Quantization for Lightweight On-Device LLMs", 2026.
 
-**What it claims:** Entropy-based per-token (or per-block) bit-width allocation. High-importance tokens (high attention-weight magnitude) retain higher precision; low-importance ones drop to 2-3 bits with negligible quality loss. Compounds with rotation-codebook quantization (TurboQuant).
+**What it claims:** Entropy-based per-token (or per-block) bit-width allocation. High-importance tokens (high attention-weight magnitude) retain higher precision; low-importance ones drop to 2-3 bits with negligible quality loss. Compounds with per-channel KV quantization (ChannelQuant).
 
 **Lambda status:** ✓ NEW — TIU block added in Phase 0.3. Block design grounded in this paper.
 
@@ -108,21 +108,21 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 ---
 
-### 5. TurboQuant (legacy — superseded by ChannelQuant on 2026-06-22)
+### 5. ChannelQuant — the KVE codec of record (recipe: KIVI / KVQuant)
 
-**Paper:** Ashkboos et al., "TurboQuant: Optimal Scalar Codebook KV Compression", arXiv 2504.19874, ICLR'26.
+**Papers:** Liu et al., "KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache", ICML 2024; Hooper et al., "KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization", 2024 (NeurIPS). Prior work: Ashkboos et al., "TurboQuant: Optimal Scalar Codebook KV Compression", arXiv 2504.19874, ICLR'26 (cited only, not the codec).
 
-**What it claims:** Walsh-Hadamard rotation + Lloyd-Max optimal scalar codebook at 3-bit per element + per-group magnitude scale. At 32-point Hadamard: 3.5 bpe effective, 4.57× compression vs FP16, quality-neutral on LongBench. At smaller Hadamard sizes: higher effective bpe due to per-group overhead.
+**What it claims:** Per-channel quantization for keys (each channel has its own scale, so a large-magnitude channel does not coarsen the whole tile) + per-token quantization for values, with a dense-and-sparse split that keeps a small set of outlier channels in high precision. Near-lossless at ~4 bits/value.
 
-**Lambda status:** ⚠ superseded. The KVE block implemented TurboQuant's 16-point variant in the pre-2026-06-22 spec (16 × 3 codebook bits + 16-bit FP16 group scale = 64 bits / 16 = 4.0 bpe → 4.0× vs FP16). As of the 2026-06-22 pivot the codec of record is **ChannelQuant** (KIVI/KVQuant recipe); TurboQuant is now cited prior work only, and this section's hardware detail is pending re-derivation.
+**Lambda status:** ✓ **codec of record.** The KVE implements ChannelQuant: per-channel INT4 keys (grouped G=128, D per-channel FP16 scales) + per-token INT4 values (INT8 in CQ-8) + a static top-k (k=2) FP16 outlier-channel lane via a calibrated ROM mask. ~3.8× vs FP16 at ~4 bits/value (measured 4.13–4.38 by head dim D). Near-lossless: HellaSwag acc_norm within ~0.4–0.8 pt of FP16 at CQ-4+ on Qwen2-0.5B/1.5B. Full block RTL complete through Sky130 sign-off in the `kv-cache-engine` repo.
 
-**Hardware implication for Lambda:** 16-pt Hadamard butterfly (64 add/sub, 4 stages × 8 pairs) + 8-centroid Lloyd-Max classifier (7 comparators × 16 lanes) + bit-pack. Zero multipliers on either encode or decode path. 0.08 mm².
+**Hardware implication for Lambda:** per-channel FP16 scale bank + one shared fp16 scale/quant/dequant unit serialized across the D channels (single divide cone) + static top-k outlier ROM mask + unified per-channel SRAM record {tag, D×FP16, D×INT4}. Decompress = per-channel `INT4·FP16` (+ FP16 replay for outlier channels); keys dequantized per-channel before the score matmul (no compressed-domain path). 16nm PD numbers (area/power/Fmax) are TBD — pending re-measurement.
 
-**Decision:** Keep as KVE's primary mode. *Confirmed.*
+**Decision:** ChannelQuant is the codec of record. Tiers CQ-8 / CQ-4 (primary) / CQ-4+ (near-lossless) + FP16 bypass. *Confirmed.*
 
-**Open question:** Asymmetric K3V2 mode (K @ 4.0 bpe, V @ 3.0 bpe avg 3.5 bpe → 4.57× compression). Paper endorses; production deployments (0xSero/turboquant on vLLM) ship with this. Confirmed as a CSR-selectable mode in `arch.yml`.
+**Open question:** which CQ tier to expose per-layer vs per-block (driven by the TIU), and the outlier-mask calibration procedure (per-model vs per-layer). Both spec'd in the `kv-cache-engine` repo; mirror into `arch.yml` before HLS.
 
-**Notes for visual rep:** "KVE: 16-pt Hadamard → Lloyd-Max 8-centroid → bit-pack. Five CSR modes: TurboQuant 3-bit (primary), Hadamard-INT4 (linear fallback), Asymmetric K3V2 (production), FP4 codebook (NVFP4 levels), FP16 bypass (debug)."
+**Notes for visual rep:** "KVE: per-channel amax → D FP16 scales → INT4 codes, k=2 outlier channels held FP16; per-token INT4 values. Tiers: CQ-8 / CQ-4 / CQ-4+ / FP16 bypass."
 
 ---
 
@@ -196,7 +196,7 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 ## Stub sections to fill in during Phase B execution
 
-- KVQuant (arXiv 2401.18079) — compare quality vs TurboQuant; document why TurboQuant wins for our hardware
+- KVQuant (arXiv 2401.18079) — part of the ChannelQuant recipe basis; document its per-channel + dense-and-sparse outlier handling as it maps onto the KVE
 - FlashAttention-2 (arXiv 2307.08691) — confirm our VecU microcode handles FA-2 cases
 - Speculative decoding — Medusa (2401.10774), EAGLE — make explicit Lambda compat surface
 - Multi-token prediction (DSV3) — make explicit
@@ -205,7 +205,7 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 - Continuous batching — document why we deliberately exclude
 - MoE — document why we deliberately exclude (single-session chip)
 - Mamba / SSM — document why out of scope (different math)
-- Oaken, Titanus, GEAR, Lexico — quick comparisons against TurboQuant
+- Oaken, Titanus, GEAR, Lexico — quick comparisons against ChannelQuant (KIVI/KVQuant recipe)
 
 ---
 

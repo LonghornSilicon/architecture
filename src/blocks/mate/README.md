@@ -7,8 +7,8 @@
 - 8×8 grid = 64 INT8×INT4 PEs at 1 GHz → 128 GOPS peak, 76.8 GOPS sustained at 60% util
 - Weight-stationary primary dataflow (Q/K/V proj, FFN, logits)
 - Output-stationary alt dataflow for Q·K^T (Q pinned, K streams from kv_scratchpad)
-- Compressed-domain attention scoring against KVE-compressed K *(legacy: INT8 (Q) × INT3 (compressed K codebook idx) was the TurboQuant-era path; the compressed-domain read path under the ChannelQuant codec of record is pending re-derivation)*
-- **INT16 partial-product register inside each PE; INT24 K-axis accumulator at column output** (correction from earlier "INT16 accumulator" spec bug — see `STATUS.md` §4 #3)
+- Q·K^T scoring on **per-channel-dequantized K**: under the ChannelQuant codec of record the KVE reconstructs K as `INT4_code · FP16_scale` (+ FP16 replay for the k=2 outlier channels) **before** the score matmul — there is no compressed-domain / raw-index read path.
+- **INT16 partial-product register inside each PE; INT24 K-axis accumulator at column output** (correction from earlier "INT16 accumulator" spec bug — see `STATUS.md` §4 #3). *(Accumulator margin was derived from the retired 3B dims; TBD, pending re-derivation for ChannelQuant / Qwen2-1.5B.)*
 - 0.10 mm² target at 16nm; 0.32 W at 50% util
 
 ## Quick start

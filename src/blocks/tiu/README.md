@@ -10,7 +10,7 @@
 - **Updated by VecU during softmax.** Each attention pass: VecU broadcasts cumulative softmax weight per block to TIU; TIU accumulator adds.
 - **Consumed by two downstream paths:**
   - MSC eviction policy: when scratchpad fills, evict block with lowest cumulative importance (H2O-style heavy-hitter retention)
-  - KVE per-block precision: high-importance blocks stay at the higher ChannelQuant tier (e.g. CQ-4+); low-importance blocks demote to a lower tier at the cost of quality *(legacy drafts named specific 4.0/3.0/2.0 bpe TurboQuant tiers — pending re-derivation for ChannelQuant's CQ-8/CQ-4/CQ-4+)*
+  - KVE per-block precision: high-importance blocks stay at the higher ChannelQuant tier (CQ-4+ or CQ-8); low-importance blocks demote to CQ-4 at the cost of quality
 - 0.03 mm²; 0.01 W; ~15 verification tests.
 
 ## Four CSR-selectable modes
@@ -25,7 +25,7 @@
 ## Why this block earns its 0.03 mm²
 
 - Real H2O / TOVA / Scissorhands-style adaptive KV retention claimed **on-silicon**. No closed-source NPU does this today (Apple, Qualcomm, Google all use uniform-precision KV in their NPUs).
-- Compounds with the KVE ChannelQuant codec for an additional **1.3-1.7× effective compression on long contexts** without quality loss. *(The 1.3-1.7× figure was derived against the legacy TurboQuant codec — pending re-derivation for ChannelQuant.)*
+- Compounds with the KVE ChannelQuant codec for additional effective compression on long contexts without quality loss. *(The compounding factor — legacy drafts said 1.3-1.7× — is TBD, pending re-derivation for ChannelQuant / Qwen2-1.5B.)*
 - Honors Chaithu's TIU framework as a real on-die block; the design here departs from his draft (which was unspecified) and is grounded in arXiv 2604.04722.
 
 ## Files (to be written in Phase E)

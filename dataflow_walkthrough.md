@@ -1,8 +1,10 @@
 # Lambda — Unit-by-Unit Dataflow Walkthrough
 
+> **Codec-of-record note (2026-06-22 pivot):** the KV codec of record is now **ChannelQuant** (per-channel INT4 keys, grouped G=128; per-token INT4 values; static top-k FP16 outlier-channel lane; ~3.8× at ~4 bits/value), packaged as the **KV Cache Engine (KVE)** — full block in the `kv-cache-engine` repo. **Stage 7 below still describes the legacy TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max datapath**; that microarchitecture and its numbers predate the pivot and are pending human re-derivation for ChannelQuant. Likewise the Llama-3.2-3B running example predates the pivot (canonical target is up to 1.5B, validated on Qwen2-1.5B); its per-model dimensions are retained here only as a teaching walkthrough and are pending re-derivation.
+
 A guided tour of every block in Lambda, walked through in the order data actually flows during a decode token. Each block becomes concrete as it appears in the journey of one token through one layer.
 
-**Setting:** the user has been chatting for a while, KV cache is partially built up, the chip is about to generate token #42. Model: Llama-3.2-3B (3072-dim hidden, 28 layers, 8 KV heads × 128 dim).
+**Setting (legacy teaching example, pre-pivot):** the user has been chatting for a while, KV cache is partially built up, the chip is about to generate token #42. Model: Llama-3.2-3B (3072-dim hidden, 28 layers, 8 KV heads × 128 dim).
 
 **Companions:**
 - [`arch.yml`](arch.yml) — machine-readable spec with all numbers
@@ -42,7 +44,7 @@ First, MSC consults its **block-table TLB** — a 128-entry associative lookup t
 
 Now MSC needs to issue an actual DRAM read. It walks down to the LPDDR5X controller, which translates the request into a sequence of low-level DRAM commands honoring the timing rules: ACT (activate the row containing our address) → wait `tRCD` (~14 ns) → READ → wait `tCCD` (~5 ns) → READ → ... and tracks which banks are open so it can re-use them and avoid redundant ACTs. Open-page policy with bank-conflict avoidance. This part of MSC alone is a few thousand gates of state machine — non-trivial verification load.
 
-The 4-port SRAM crossbar inside MSC stays quiet for now (MatE/VecU/KCE/host are all idle waiting). MSC's request goes out to the LPDDR5X PHY.
+The 4-port SRAM crossbar inside MSC stays quiet for now (MatE/VecU/KVE/host are all idle waiting). MSC's request goes out to the LPDDR5X PHY.
 
 ---
 
@@ -66,7 +68,7 @@ The other three SRAM banks deserve introduction now too, because MatE is about t
 
 - **`activation_buffer` (0.3 MB, 2-port)** — holds the input vector `act_buf` (the previous layer's output, residual-summed and norm'd). 2-port because MatE is going to read it while VecU writes the next iteration's update. ~0.26 mm².
 - **`kv_scratchpad` (0.4 MB, 1-port)** — the headline bank. Holds compressed K and V from the last several thousand tokens of this layer. We'll touch it later in this stage's attention step.
-- **`codebook_const_rom` (64 KB, 1-port read-only)** — the Lloyd-Max centroids, RoPE freq table, and exp/sigmoid/rsqrt LUTs. Read by KCE and VecU; never written.
+- **`codebook_const_rom` (64 KB, 1-port read-only)** — the Lloyd-Max centroids, RoPE freq table, and exp/sigmoid/rsqrt LUTs. Read by KVE and VecU; never written. *(The Lloyd-Max centroids are legacy TurboQuant-era; the ChannelQuant codec of record does not use a codebook ROM — pending re-derivation.)*
 
 Total on-chip SRAM: 0.8 MB across these four banks, ~0.71 mm² of die. KV-dominant by 50% intentionally — long-context decode is KV-bandwidth-bound; weight buffer just needs to hide LPDDR latency.
 
@@ -112,11 +114,13 @@ Why is VecU programmable instead of fixed-function for RoPE? Because the same SI
 
 ---
 
-## Stage 7 — KCE compresses K and V into the scratchpad
+## Stage 7 — KVE compresses K and V into the scratchpad
 
-LSU fires `ISSUE_KCE_COMP k → kv_scratchpad`. The **KCE (KV Compression Engine)** wakes up — 0.08 mm² of the chip's headline IP, the silicon implementation of TurboQuant.
+> **LEGACY (pre-2026-06-22 pivot):** this stage describes the TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max datapath. The codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane), and this whole stage's mechanics and PPA numbers are pending human re-derivation for ChannelQuant. Read the block name as **KVE (KV Cache Engine)**; the description below is retained for continuity only.
 
-K is a 1024-element vector (8 KV heads × 128 dim) for this token in this layer. KCE processes it in 16-element chunks. For each chunk:
+LSU fires `ISSUE_KCE_COMP k → kv_scratchpad`. The **KVE (KV Cache Engine)**, formerly the KCE block, wakes up — 0.08 mm² *(legacy TurboQuant-era area)*, described below in its legacy TurboQuant form.
+
+K is a 1024-element vector (8 KV heads × 128 dim) for this token in this layer. [Legacy TurboQuant path] KVE processes it in 16-element chunks. For each chunk:
 
 ```
 [16-element vector, FP16]
@@ -177,7 +181,7 @@ Inside the same softmax tile loop, VecU broadcasts a side-channel signal to the 
 The TIU update is essentially free: it piggybacks on the softmax tile cadence with one extra microcode op per tile (~1 µop adds across 100 tiles = ~100 extra µops per layer). The cumulative importance per block is what downstream consumers use:
 
 - **MSC eviction policy** — when the kv_scratchpad fills, MSC asks TIU for the lowest-importance block and evicts that one (H2O-style heavy-hitter retention)
-- **KCE-mini per-block precision** — when KCE re-compresses an evicted-and-recalled block, it queries TIU to decide whether to keep it at 4.0 bpe (high importance) or demote to 3.0 bpe (mid) or 2.0 bpe (low importance, attention-sink-like)
+- **KVE per-block precision** — when the KV Cache Engine re-compresses an evicted-and-recalled block, it queries TIU to decide the block's precision tier (higher importance retained at a higher tier; lower importance demoted). *(The specific 4.0/3.0/2.0 bpe tiers named here are legacy TurboQuant-era; ChannelQuant's CQ-8/CQ-4/CQ-4+ tier mapping is pending re-derivation.)*
 
 TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. It was added to Lambda on 2026-05-14 (Phase 0.3, after the Phase 0 audit decisions). Its `csr_modes` field lets the chip switch among `tiu_off` / `tiu_h2o` / `tiu_streaming_llm` / `tiu_adaptive_precision` — useful both as a research ablation knob and as a per-workload tuning lever.
 
@@ -185,7 +189,7 @@ TIU is the silicon expression of arXiv 2604.04722's adaptive-precision-KV idea. 
 
 ## Stage 10 — MatE does softmax · V → attention output
 
-LSU dispatches `ISSUE_MAT_E pv, softmax_scores · v_compressed → attn_out`. MatE goes back to normal weight-stationary dataflow but with V (compressed in scratchpad, dequantized on the fly through KCE inverse path) as the streaming operand.
+LSU dispatches `ISSUE_MAT_E pv, softmax_scores · v_compressed → attn_out`. MatE goes back to normal weight-stationary dataflow but with V (compressed in scratchpad, dequantized on the fly through the KVE inverse path) as the streaming operand.
 
 Wait — in the FlashAttention-3 algorithm, `softmax_scores · V` was actually accumulated *during* the softmax tile loop in stage 9, not as a separate GEMM. So strictly speaking VecU and MatE are interleaving on a per-tile basis: tile-of-K arrives → MatE scores → VecU updates softmax + accumulates `O += weighted V`. When the last tile is consumed, `O` is the final attention output.
 
@@ -237,7 +241,7 @@ HIF (boot) ──▶ LPDDR (weights at rest)
 LSU ──▶ MSC ──▶ PHY ──▶ LPDDR ──▶ PHY ──▶ MSC ──▶ weight_stream_buffer ──▶ MatE
        (translate)               (DRAM read)        (SRAM staging)         │
                                                                             ▼
-activation_buffer ◀── VecU (RoPE) ◀── MatE (QKV proj output) ──▶ KCE ──▶ kv_scratchpad
+activation_buffer ◀── VecU (RoPE) ◀── MatE (QKV proj output) ──▶ KVE ──▶ kv_scratchpad
                                                                             │
                        MatE (output-stationary) ◀── kv_scratchpad ◀────────┘
                        (Q·K^T compressed-domain)

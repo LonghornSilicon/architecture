@@ -10,7 +10,9 @@ If you read only one thing, read §0. If you read two, add §3 (the TODO).
 
 ## 0. The 60-second version
 
-**Lambda** is a **4 mm² standalone transformer-decode ASIC** on **TSMC N16FFC**, designed for tape-out via the **IMEC / Europractice mini@sic 2.0** academic shuttle (~\$60–100K shuttle, ~\$170–290K total chip cost). It runs **3–5 B-parameter W4A8 LLMs** at **6–8 tok/s decode in 2.6 W typical**, with three architectural firsts: silicon TurboQuant KV compression, compressed-domain attention scoring (INT8 × INT3), and a Token Importance Unit (TIU) driving adaptive-precision KV.
+> **Codec-of-record note (2026-06-22 pivot):** the KV codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; tiers CQ-8/CQ-4/CQ-4+), packaged as the **KV Cache Engine (KVE)** — full block in the `kv-cache-engine` repo. TurboQuant / 16-pt Hadamard KCE detail and its PPA numbers throughout this handoff predate the pivot and are pending human re-derivation; TurboQuant is cited prior work only.
+
+**Lambda** is a **4 mm² standalone transformer-decode ASIC** on **TSMC 16nm FinFET (N16FFC)**, designed for tape-out via the **IMEC / Europractice mini@sic 2.0** academic shuttle (~\$60–100K shuttle, ~\$170–290K total chip cost). It runs **up to 1.5B-parameter W4A8 LLMs (validated on Qwen2-1.5B)** at **6–8 tok/s decode in 2.6 W typical**, with the KVE ChannelQuant KV codec, a compressed-domain attention read path, and a Token Importance Unit (TIU) driving adaptive-precision KV.
 
 **Where we are:** spec is bit-fixed and audited (8 bugs corrected before HLS); repo is restructured to single canonical target; Phase 0 mid-stream arch updates (PCIe Gen3 x1 HIF, ACU naming, TIU block, area accounting fix) are in; a seminal paper exists in `paper/lambda.{tex,pdf}`. All committed.
 
@@ -20,9 +22,9 @@ If you read only one thing, read §0. If you read two, add §3 (the TODO).
 
 ## 1. State of the chip in one paragraph
 
-Lambda integrates **seven on-die functional blocks** under five top-level units (**ACU / MSC / LSU / TIU / HIF**). The ACU groups MatE (8×8 INT8×INT4 systolic with INT24 K-axis accumulator), VecU (8-lane FP16/BF16 SIMD running FA-3 online-softmax + RoPE + RMSNorm + SiLU microcode), and KCE-mini (16-pt Walsh-Hadamard + Lloyd-Max codebook + bit-pack at 4.0 bpe / 4× compression vs FP16). MSC provides PagedAttention via a 128-entry block table, a 4-port SRAM crossbar, and the LPDDR5X x16 protocol-side controller. LSU is a tiny 32-instruction in-order RISC walking the pre-compiled per-layer schedule from 4 KB of microcode RAM. **TIU (new this session)** is a 0.03 mm² block that accumulates per-block attention entropy and drives both heavy-hitter eviction (to MSC) and per-block adaptive precision (to KCE-mini). HIF is a PCIe Gen3 x1 endpoint on the M.2 2280 carrier-card form factor. On-die SRAM is 0.8 MB across 4 banks (kv_scratchpad 0.4 + activation_buf 0.3 + weight_stream 0.05 + codebook ROM 64 KB). Off-die is a 4–8 GB LPDDR5X-8533 x16 package and a host laptop / dev board over PCIe.
+Lambda integrates **seven on-die functional blocks** under the canonical four-block taxonomy (ACU / KVE / TIU / MHC) plus LSU control and HIF host I/O. The **ACU** (Block 1) groups MatE (8×8 INT8×INT4 systolic with INT24 K-axis accumulator) and VecU (8-lane FP16/BF16 SIMD running FA-3 online-softmax + RoPE + RMSNorm + SiLU microcode). The **KVE** (Block 2, KV Cache Engine, formerly the KCE block) is the **ChannelQuant** KV codec — per-channel INT4 K (grouped, G=128) + per-token INT4 V + static top-k FP16 outlier lane; ~3.8× at ~4 bits/value; tiers CQ-8/CQ-4/CQ-4+ *(the legacy "16-pt Walsh-Hadamard + Lloyd-Max + 4.0 bpe" description is pre-pivot and pending re-derivation)*. **MSC** (Block 4, maps to the canonical Memory Hierarchy Controller / MHC) provides PagedAttention via a 128-entry block table, a 4-port SRAM crossbar, and the LPDDR5X x16 protocol-side controller. LSU is a tiny 32-instruction in-order RISC walking the pre-compiled per-layer schedule from 4 KB of microcode RAM. **TIU (Block 3, new this session)** is a 0.03 mm² block that accumulates per-block attention entropy and drives both heavy-hitter eviction (to MSC) and per-block adaptive precision (to the KVE). HIF is a PCIe Gen3 x1 endpoint on the M.2 2280 carrier-card form factor. On-die SRAM is 0.8 MB across 4 banks (kv_scratchpad 0.4 + activation_buf 0.3 + weight_stream 0.05 + codebook ROM 64 KB). Off-die is a 4–8 GB LPDDR5X-8533 x16 package and a host laptop / dev board over PCIe.
 
-**Targets at decode (LPDDR5X x16 baseline):** Llama-3.2-3B @ 7.4 tok/s, Mistral-NeMo-3B @ 8.0, Qwen2.5-3B @ 7.7, Phi-3.5-mini @ 6.3, Llama-3.2-1B @ 19.3. **Power:** 2.6 W typical / 3.3 W peak. **Area:** 4.354 mm² gross / **4.014 mm² with recommended shrink path** (contingent on PHY vendor quote landing at 1.0 mm² best case).
+**Targets at decode (LPDDR5X x16 baseline):** canonical target is up to 1.5B parameters, validated on **Qwen2-1.5B**. *(FLAG: the per-model throughput figures previously listed here — Llama-3.2-3B @ 7.4 tok/s, Mistral-NeMo-3B @ 8.0, Qwen2.5-3B @ 7.7, Phi-3.5-mini @ 6.3, Llama-3.2-1B @ 19.3 — are pre-pivot 3-5B derivations and pending re-derivation for the ≤1.5B target + ChannelQuant.)* **Power:** 2.6 W typical / 3.3 W peak. **Area:** 4.354 mm² gross / **4.014 mm² with recommended shrink path** (contingent on PHY vendor quote landing at 1.0 mm² best case).
 
 ---
 
@@ -36,7 +38,7 @@ The session covered three distinct phases of work. The full audit trail is in [`
 
 **(c) Phase 0 mid-stream arch updates.** Four mid-stream changes triggered by user direction:
    - **HIF: USB-C 2.0 → PCIe Gen3 x1** on **M.2 2280** form factor. +0.25 mm² area; weight-load time 25 s → 1.5 s; vendor IP has public 16nm datasheets.
-   - **ACU naming convention adopted** (umbrella for MatE + VecU + KCE-mini); honors Chaithu Talasila's `adaptive-precision-attention` framework while preserving Lambda's block decomposition.
+   - **ACU naming convention adopted** (umbrella for MatE + VecU + KVE); honors Chaithu Talasila's `adaptive-precision-attention` framework while preserving Lambda's block decomposition.
    - **TIU block added** (NEW, 0.03 mm²) — modeled on arXiv 2604.04722 "Adaptive KV-Cache Quantization for Lightweight On-Device LLMs."
    - **Area accounting fix** — earlier drafts silently dropped the routing_overhead_buffer from `total_mm2`; gross area is now honestly 4.354 mm², shrink path lands at 4.014 mm².
 
@@ -83,7 +85,7 @@ These are spec gaps that need to close before the HLS work (Phase E) can start c
 
    **(9) Compressed-domain attention numerical eval** — **this is the chip's biggest novel claim.** INT8 (Q) × INT3 (compressed K) → INT24 reduction is mathematically sound, but needs **MMLU / LongBench / Needle-in-a-Haystack eval against Llama-3.2-3B + TurboQuant 4.0 bpe** to confirm the FP16-free claim holds at our 16-point Hadamard (the published TurboQuant result is for 32-point Hadamard at 3.5 bpe — we're at 16-pt at 4.0 bpe). Owner: ML student. Deadline target: 2026-07. Gates the demo-model decision.
 
-   **(10) MLA-gap revisit decision** — currently locked out per [`../docs/literature_audit.md`](literature_audit.md) §3. **If DeepSeek-V2-style models become the dominant 3–5 B target by tape-out 2028, this gap is the chip's biggest competitive risk.** Worth a periodic check (every 3–6 months). The architectural cost to add MLA is real: MSC + MatE redesign for latent KV layout, ~+0.05 mm² across blocks, ~30 verification tests.
+   **(10) MLA-gap revisit decision** — currently locked out per [`../docs/literature_audit.md`](literature_audit.md) §3. **If DeepSeek-V2-style models become the dominant small-model target by the Summer 2027 tape-out, this gap is the chip's biggest competitive risk.** Worth a periodic check (every 3–6 months). The architectural cost to add MLA is real: MSC + MatE redesign for latent KV layout, ~+0.05 mm² across blocks, ~30 verification tests.
 
    **(11) Etched-patent IP review** — defensive review with **UT Austin tech transfer office** still pending. Mentioned in [`../paper/lambda.tex`](../paper/lambda.tex) §VII.B and [`../arch.yml`](../arch.yml) MatE block note. Not blocking, but should clear before silicon commit. Patent reference: US 2024/0419516 A1 (Etched.ai).
 
@@ -95,12 +97,12 @@ These are committed architectural decisions. If you find yourself wanting to cha
 
 | Decision | Lives in | Why it's locked |
 |---|---|---|
-| 4 mm² die at TSMC N16FFC | `arch.yml` `metadata` + `process` | IMEC mini@sic 2.0 minimum-block-area tier; ~\$60–100K academic shuttle. Anything bigger is unfundable. |
+| 4 mm² die at TSMC 16nm FinFET (N16FFC), via imec / TSMC University Program | `arch.yml` `metadata` + `process` | IMEC mini@sic 2.0 minimum-block-area tier; ~\$60–100K academic shuttle. Anything bigger is unfundable. |
 | W4A8 quantization | `arch.yml` `quantization_strategy` | ACL'25 sweet spot for small LLMs; AWQ + GPTQ + SmoothQuant trio is production-grade. |
-| TurboQuant 4.0 bpe at 16-pt Hadamard (KCE-mini) | `arch.yml` KCE-mini block | First-principles derivation: 16×3 + 16 = 64 bits / 16 elem = 4.0 bpe → 4× vs FP16. Earlier 3.5/5.3 bpe claims were errors. |
+| ChannelQuant KV codec (KVE block) — per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane; tiers CQ-8/CQ-4/CQ-4+ | `arch.yml` KVE block; `kv-cache-engine` repo | Codec of record (2026-06-22 pivot). *(The prior "TurboQuant 4.0 bpe at 16-pt Hadamard" locked decision is retired; its bpe/area derivation is pre-pivot and pending re-derivation.)* |
 | 8×8 MatE INT8×INT4 (64 PEs, 128 GOPS peak) | `arch.yml` MatE block | Bandwidth-bound regime needs only 48 GOPS sustained; 8×8 gives 1.6× headroom (constant across model size). |
 | **INT24 K-axis accumulator** (NOT INT16) | `arch.yml` MatE block | INT16 saturates at K>64 for INT8×INT4 reductions; INT24 is the minimum safe width. |
-| **Compressed-domain attention scoring** (INT8 × INT3 direct) | `arch.yml` `attention_compute` | TurboQuant's Hadamard rotation eliminates outliers → no FP16 fallback needed → saves ~0.4 mm² of MatE fabric. Novel contribution. |
+| **Compressed-domain attention read path** | `arch.yml` `attention_compute` | *(Legacy TurboQuant rationale: Hadamard rotation eliminates outliers → no FP16 fallback → saves ~0.4 mm² of MatE fabric. Under the ChannelQuant codec of record this claim and the INT8×INT3 direct-scoring mechanism are pending re-derivation.)* |
 | **PCIe Gen3 x1 HIF on M.2 2280** | `arch.yml` HIF block, [`../src/blocks/hif/README.md`](../src/blocks/hif/README.md) | Decided 2026-05-14 (was USB-C 2.0). 1.5 s weight load vs 25 s; vendor IP has public 16nm datasheets; M.2 form factor enables plug-and-play. |
 | **ACU naming convention** (umbrella = MatE+VecU+KCE) | `arch.yml` `compute_unit_grouping` | Honors Chaithu's framework; preserves internal block structure for HLS. |
 | **TIU block** (per-block attention-entropy accumulator) | `arch.yml` TIU block, [`../src/blocks/tiu/README.md`](../src/blocks/tiu/README.md) | NEW 2026-05-14. First silicon implementation of arXiv 2604.04722. 0.03 mm² for real H2O / Scissorhands / adaptive-precision KV claim. |
@@ -116,7 +118,7 @@ These are committed architectural decisions. If you find yourself wanting to cha
 | Open decision | Gated on | Expected resolution |
 |---|---|---|
 | LPDDR5X vs LPDDR4X PHY | Q2 2026 vendor quote (Synopsys + Cadence parallel) | 2026-06 |
-| Demo target model (Llama-3.2-3B / Mistral-NeMo-3B / Qwen2.5-3B) | ML student quality eval (MMLU + LongBench) at W4A8 + TurboQuant 4.0 bpe | 2026-07 |
+| Demo target model — up to 1.5B, validated on Qwen2-1.5B | ML student quality eval (MMLU + LongBench) at W4A8 + ChannelQuant (CQ-4/CQ-4+) | 2026-07 |
 | Senior FinFET PHY PD engineer in place | Hiring / partnership conversation | 2026-07 |
 | IMEC mini@sic 2.0 4 mm² N16FFC pricing | Direct quote via `eptsmc@imec.be` | 2026-05 |
 | Sparse-blocked attention add-on detail | Phase B literature audit completion | 2026-06 |
@@ -221,7 +223,7 @@ The single load-bearing chip-level risk: **LPDDR PHY at 16nm** (R-Lv2-01, R-Lv2-
 4. **INT24 sufficiency at K=8192 FFN dimension** — log₂(K) + 11 = 24 bits exactly; *just* fits. Sanity-check before HLS (TODO §3.2 item 2).
 5. **Compressed-domain attention quality** — the chip's headline claim. TurboQuant's 32-pt result needs to hold at our 16-pt variant; eval needed (TODO §3.3 item 9).
 6. **Etched patent (US 2024/0419516 A1)** — defensive review with UT tech transfer pending. Not blocking; architectural read is non-infringement (one fabric, two modes, not two structurally separated circuits).
-7. **Tape-out timeline (2028)** — model class may commoditize on mobile NPUs by then; mitigation is the open-source-academic-standalone differentiation, which doesn't compete on raw perf.
+7. **Tape-out timeline (Summer 2027)** — model class may commoditize on mobile NPUs by then; mitigation is the open-source-academic-standalone differentiation, which doesn't compete on raw perf.
 
 ---
 

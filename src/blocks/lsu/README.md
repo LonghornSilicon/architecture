@@ -22,7 +22,7 @@ Three issue lanes per cycle, each dispatching to one downstream block:
 
 ## Why so minimal
 
-Compiler emits the schedule once per model; chip walks it forever. The host loads ~3K instructions of microcode over USB-C at boot. Layer N+1 reuses layer N's schedule with only the layer-index register bumped. No need for branch prediction or speculative execution at this scale.
+Compiler emits the schedule once per model; chip walks it forever. The host loads ~3K instructions of microcode over PCIe Gen3 x1 (HIF) at boot. Layer N+1 reuses layer N's schedule with only the layer-index register bumped. No need for branch prediction or speculative execution at this scale.
 
 ## Files
 

@@ -5,7 +5,7 @@ Bit-accurate Python reference implementations for every Lambda block. The HLS C+
 ## Files (to be written)
 
 - `mate.py` — MatE PE microarchitecture + 8×8 systolic array + INT8×INT4 + INT24 K-axis acc. Both dataflow modes (weight-stationary, output-stationary for Q·K^T).
-- `kce.py` — 16-pt Walsh-Hadamard butterfly + Lloyd-Max 8-centroid classifier + bit-pack. All 5 CSR modes.
+- `kce.py` — KVE ChannelQuant reference: per-channel INT4 K (grouped G=128) + per-token INT4 V + static top-k FP16 outlier lane; tiers CQ-8/CQ-4/CQ-4+. *(File name kept for HLS continuity. The prior "16-pt Walsh-Hadamard + Lloyd-Max 8-centroid + bit-pack, 5 CSR modes" reference is legacy pre-pivot, pending re-derivation.)*
 - `vecu.py` — 8-lane FP/BF SIMD + exp/rsqrt/sigmoid LUTs + online softmax + RoPE.
 - `msc.py` — 128-entry block table + DMA FSM + LPDDR timing model (high-level).
 - `lsu.py` — 32-inst decoder + 3-lane dispatch + register file.
@@ -13,7 +13,7 @@ Bit-accurate Python reference implementations for every Lambda block. The HLS C+
 
 ## Cross-block reference
 
-- `full_chip.py` — composes all the above into an end-to-end cycle-approximate model of a decode token through the chip on Llama-3.2-3B or another target model. Goal: produce token-level outputs that match a CPU run of the same model at W4A8 + TurboQuant 4.0 bpe quantization to within rounding tolerance.
+- `full_chip.py` — composes all the above into an end-to-end cycle-approximate model of a decode token through the chip on Qwen2-1.5B (the ≤1.5B validation target) or another target model. Goal: produce token-level outputs that match a CPU run of the same model at W4A8 + ChannelQuant (CQ-4 / CQ-4+) quantization to within rounding tolerance.
 
 ## Verification flow
 

@@ -1,5 +1,7 @@
 # Lambda — Frontier Literature Audit (2026-05)
 
+> **Codec-of-record note (2026-06-22 pivot):** Lambda's KV codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; KV Cache Engine / KVE block; full block in the `kv-cache-engine` repo; recipe follows **KIVI (ICML 2024) / KVQuant (2024)**). Sections below that mark TurboQuant / 16-pt Hadamard as the "Lambda status: implemented" codec predate the pivot — treat TurboQuant as evaluated/cited prior work, not the chip's current codec. Those "Lambda status" lines are pending re-derivation.
+
 **Status:** living document. Grows as each Tier-1 paper is read carefully. Final form feeds Phase D consolidation into `arch.yml` and the visual representation.
 
 **Purpose:** comprehensive ground-truth audit of every attention/FFN/KV mechanism we considered for Lambda. For each: paper citation, claim, hardware implication, decision (keep/add/defer/reject), and notes for the visual representation we'll build later.
@@ -25,8 +27,9 @@
 | Continuous batching | ❌ explicitly NOT supported | reject (single-session chip) | vLLM |
 | Mixture of Experts (MoE) | ❌ explicitly NOT supported | reject | Switch / Mixtral |
 | Mamba / SSM | ❌ out of scope | reject | arXiv 2312.00752 |
-| TurboQuant 3.5b → 4.0 bpe at v2's 16-pt | ✓ KCE-mini primary | keep | arXiv 2504.19874 |
-| KVQuant per-channel | ❌ not supported | defer | arXiv 2401.18079 |
+| ChannelQuant (per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane) | ✓ KVE codec of record | keep | KIVI (ICML 2024) / KVQuant (2024) |
+| TurboQuant 16-pt (legacy) | superseded by ChannelQuant | cited prior work only | arXiv 2504.19874 |
+| KVQuant per-channel | ✓ part of the ChannelQuant recipe | keep | arXiv 2401.18079 |
 | Adaptive precision KV (TIU) | ✓ NEW per Phase 0.3 | **add (add-on 1)** | arXiv 2604.04722 |
 
 Two add-ons confirmed (per user direction): **TIU** (Phase 0.3) and **sparse-blocked attention CSR mode in MSC** (this audit).
@@ -77,9 +80,9 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 **What it claims:** Compress Q/K/V into a low-rank latent space *before* the attention head split. Reduces per-layer KV by ~10× vs MHA at comparable quality. Different KV layout — instead of (kv_heads × head_dim) per token, store a single (latent_dim) vector per token.
 
-**Lambda status:** ❌ not supported. MSC and KCE-mini assume the GQA/MHA layout (kv_heads × head_dim).
+**Lambda status:** ❌ not supported. MSC and KVE assume the GQA/MHA layout (kv_heads × head_dim).
 
-**What would it cost to add:** MSC block-table indexer change; KCE-mini compresses latent vector instead of per-head K/V; MatE Q·K^T becomes Q × (latent → K decompress) which is an additional matmul step. ~+0.05 mm² across blocks; new CSR mode; ~30 verification tests.
+**What would it cost to add:** MSC block-table indexer change; KVE compresses latent vector instead of per-head K/V; MatE Q·K^T becomes Q × (latent → K decompress) which is an additional matmul step. ~+0.05 mm² across blocks; new CSR mode; ~30 verification tests.
 
 **Decision:** **Defer.** Too much arch surface change for the v0.4 spec. Worth revisiting for a v1.0 future Lambda revision IF DeepSeek-style MLA becomes the dominant 3-5B architecture (currently it's a 250B+ MoE technique).
 
@@ -95,31 +98,31 @@ Each section below is grown during Phase B reading. Empty sections are stubs to 
 
 **Lambda status:** ✓ NEW — TIU block added in Phase 0.3. Block design grounded in this paper.
 
-**Hardware implication for Lambda:** 256 B importance SRAM (128 blocks × 2 B); update path is VecU softmax → TIU accumulator per attention pass; consumer paths are MSC eviction policy + KCE-mini per-block precision mode. ~0.03 mm², ~15 verification tests.
+**Hardware implication for Lambda:** 256 B importance SRAM (128 blocks × 2 B); update path is VecU softmax → TIU accumulator per attention pass; consumer paths are MSC eviction policy + KVE per-block precision mode. ~0.03 mm², ~15 verification tests.
 
 **Decision:** **Add as add-on 1.** *Confirmed Phase 0.3.*
 
 **Open question:** Per-block vs per-token granularity. The paper allows either; per-block is silicon-cheaper (2 B per 16 tokens vs 2 B per token = 16× compression on the metadata). Lambda chooses per-block.
 
-**Notes for visual rep:** "TIU: 256 B SRAM holding 128 × 16-bit importance scores; updated by VecU softmax broadcast; consumed by MSC eviction and KCE precision-mode lookup."
+**Notes for visual rep:** "TIU: 256 B SRAM holding 128 × 16-bit importance scores; updated by VecU softmax broadcast; consumed by MSC eviction and KVE precision-mode lookup."
 
 ---
 
-### 5. TurboQuant (KCE-mini's algorithmic core)
+### 5. TurboQuant (legacy — superseded by ChannelQuant on 2026-06-22)
 
 **Paper:** Ashkboos et al., "TurboQuant: Optimal Scalar Codebook KV Compression", arXiv 2504.19874, ICLR'26.
 
 **What it claims:** Walsh-Hadamard rotation + Lloyd-Max optimal scalar codebook at 3-bit per element + per-group magnitude scale. At 32-point Hadamard: 3.5 bpe effective, 4.57× compression vs FP16, quality-neutral on LongBench. At smaller Hadamard sizes: higher effective bpe due to per-group overhead.
 
-**Lambda status:** ✓ KCE-mini implements 16-point variant. 16 elements × 3 codebook bits + 16-bit FP16 group scale = 64 bits per 16 elements = 4.0 bpe → 4.0× compression vs FP16. Verified by re-derivation 2026-05-14.
+**Lambda status:** ⚠ superseded. The KVE block implemented TurboQuant's 16-point variant in the pre-2026-06-22 spec (16 × 3 codebook bits + 16-bit FP16 group scale = 64 bits / 16 = 4.0 bpe → 4.0× vs FP16). As of the 2026-06-22 pivot the codec of record is **ChannelQuant** (KIVI/KVQuant recipe); TurboQuant is now cited prior work only, and this section's hardware detail is pending re-derivation.
 
 **Hardware implication for Lambda:** 16-pt Hadamard butterfly (64 add/sub, 4 stages × 8 pairs) + 8-centroid Lloyd-Max classifier (7 comparators × 16 lanes) + bit-pack. Zero multipliers on either encode or decode path. 0.08 mm².
 
-**Decision:** Keep as KCE-mini's primary mode. *Confirmed.*
+**Decision:** Keep as KVE's primary mode. *Confirmed.*
 
 **Open question:** Asymmetric K3V2 mode (K @ 4.0 bpe, V @ 3.0 bpe avg 3.5 bpe → 4.57× compression). Paper endorses; production deployments (0xSero/turboquant on vLLM) ship with this. Confirmed as a CSR-selectable mode in `arch.yml`.
 
-**Notes for visual rep:** "KCE-mini: 16-pt Hadamard → Lloyd-Max 8-centroid → bit-pack. Five CSR modes: TurboQuant 3-bit (primary), Hadamard-INT4 (linear fallback), Asymmetric K3V2 (production), FP4 codebook (NVFP4 levels), FP16 bypass (debug)."
+**Notes for visual rep:** "KVE: 16-pt Hadamard → Lloyd-Max 8-centroid → bit-pack. Five CSR modes: TurboQuant 3-bit (primary), Hadamard-INT4 (linear fallback), Asymmetric K3V2 (production), FP4 codebook (NVFP4 levels), FP16 bypass (debug)."
 
 ---
 

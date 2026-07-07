@@ -12,7 +12,7 @@ This directory holds the headers that define both layers.
 
 - `lsu.h` — LSU instruction encoding, opcodes, register names
 - `vecu_microcode.h` — VecU microcode word format, op handles
-- `csr_map.h` — CSR address space (HIF-exposed; layer mode selects, KCE mode selects, etc.)
+- `csr_map.h` — CSR address space (HIF-exposed; layer mode selects, KVE codec/tier selects, etc.)
 
 ## Status
 
@@ -28,4 +28,4 @@ See `STATUS.md` §7 for the planned cross-cutting work that touches the ISA desi
 
 - Whether to fuse `ISSUE_MAT_E` + `ISSUE_VEC_U` into a single FA-3 macro-op
 - Whether to add a runtime precision-mode field (cf. Chaithu's adaptive-precision controller) or leave precision selection entirely to the static schedule
-- Whether to expose the KCE asymmetric K3V2 / FP4 / TurboQuant mode select as a per-layer CSR or per-tile micro-field
+- Whether to expose the KVE ChannelQuant tier select (CQ-8 / CQ-4 / CQ-4+) as a per-layer CSR or per-tile micro-field *(legacy drafts framed this as a TurboQuant / asymmetric-K3V2 / FP4 mode select; pending re-derivation)*

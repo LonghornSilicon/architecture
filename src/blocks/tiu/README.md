@@ -10,22 +10,22 @@
 - **Updated by VecU during softmax.** Each attention pass: VecU broadcasts cumulative softmax weight per block to TIU; TIU accumulator adds.
 - **Consumed by two downstream paths:**
   - MSC eviction policy: when scratchpad fills, evict block with lowest cumulative importance (H2O-style heavy-hitter retention)
-  - KCE-mini per-block precision: high-importance blocks stay at 4.0 bpe (TurboQuant-3bit primary); low-importance blocks demote to 3.0 bpe (asymmetric K3V2 codebook) or 2.0 bpe at the cost of quality
+  - KVE per-block precision: high-importance blocks stay at the higher ChannelQuant tier (e.g. CQ-4+); low-importance blocks demote to a lower tier at the cost of quality *(legacy drafts named specific 4.0/3.0/2.0 bpe TurboQuant tiers — pending re-derivation for ChannelQuant's CQ-8/CQ-4/CQ-4+)*
 - 0.03 mm²; 0.01 W; ~15 verification tests.
 
 ## Four CSR-selectable modes
 
 | Mode | Behavior |
 |---|---|
-| `tiu_off` | No importance tracking. MSC eviction = pure FIFO. KCE-mini = uniform 4.0 bpe. |
-| `tiu_h2o` | Heavy-hitter retention. MSC evicts lowest-importance block. KCE stays uniform 4.0 bpe. |
+| `tiu_off` | No importance tracking. MSC eviction = pure FIFO. KVE = uniform ChannelQuant tier. |
+| `tiu_h2o` | Heavy-hitter retention. MSC evicts lowest-importance block. KVE stays at a uniform ChannelQuant tier. |
 | `tiu_streaming_llm` | Recent + sink tokens retained. MSC eviction = LRU except for first-N "attention sinks." |
-| `tiu_adaptive_precision` | Full adaptive. MSC eviction = importance-driven AND KCE per-block precision = importance-driven. |
+| `tiu_adaptive_precision` | Full adaptive. MSC eviction = importance-driven AND KVE per-block precision = importance-driven. |
 
 ## Why this block earns its 0.03 mm²
 
 - Real H2O / TOVA / Scissorhands-style adaptive KV retention claimed **on-silicon**. No closed-source NPU does this today (Apple, Qualcomm, Google all use uniform-precision KV in their NPUs).
-- Compounds with TurboQuant for an additional **1.3-1.7× effective compression on long contexts** without quality loss.
+- Compounds with the KVE ChannelQuant codec for an additional **1.3-1.7× effective compression on long contexts** without quality loss. *(The 1.3-1.7× figure was derived against the legacy TurboQuant codec — pending re-derivation for ChannelQuant.)*
 - Honors Chaithu's TIU framework as a real on-die block; the design here departs from his draft (which was unspecified) and is grounded in arXiv 2604.04722.
 
 ## Files (to be written in Phase E)

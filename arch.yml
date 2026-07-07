@@ -1,25 +1,35 @@
 # =============================================================================
 # Lambda — Standalone end-to-end transformer accelerator (4 mm² die)
 # =============================================================================
+# CODEC-OF-RECORD NOTE (2026-06-22 pivot): the signed-off KV-cache compression
+# codec is now ChannelQuant (per-channel INT4 keys grouped G=128 + per-token
+# INT4 values + static top-k FP16 outlier-channel lane; tiers CQ-8/CQ-4/CQ-4+;
+# ~3.8x KV compression at ~4 bits/value, near-lossless). The block is the KV
+# Cache Engine (KVE); its full definition lives in the kv-cache-engine repo.
+# The TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max KCE microarchitecture and
+# ALL its derived PPA numbers below (0.08 mm2 area, 4.0 bpe, centroid indices,
+# butterfly gate counts, compressed-domain scoring) predate this pivot and are
+# PENDING HUMAN RE-DERIVATION for ChannelQuant. Where this file still names
+# TurboQuant/Hadamard/Lloyd-Max/KCE/4.0 bpe, treat it as legacy. TurboQuant
+# remains a cited prior work only (see citations.C-01), not the current codec.
+#
 # Canonical architecture spec. This is the single source of truth for the chip.
 #
 # Lambda is a STANDALONE end-to-end mini-accelerator: includes a LPDDR5X x16
-# channel (~12 GB/s sustained), a tight 8×8 MatE / 8-lane VecU / KCE-mini
+# channel (~12 GB/s sustained), a tight 8×8 MatE / 8-lane VecU / KVE
 # compute fabric, and runs the entire transformer decode loop on-die.
 #
-# **Largest reasonable model: 4-5B-class** (Llama-3.2-3B, Phi-3.5-mini,
-# Qwen2.5-3B, Mistral-NeMo-3B comfortably; pushing up to ~5B at borderline
-# interactive 5 tok/s). The headline win: at 4 mm² Lambda serves the same
-# model class the abandoned 25 mm² flagship was targeting at 7-8B, because
-# we trade bandwidth depth (1× LPDDR5X x16 at 12 GB/s vs flagship's 2×
-# LPDDR5X x64 at 100 GB/s) for area we can afford.
+# **Largest reasonable model: up to 1.5B parameters, validated on Qwen2-1.5B.**
+# The headline win: at 4 mm² Lambda serves this model class standalone,
+# because we trade bandwidth depth (1× LPDDR5X x16 at 12 GB/s vs the abandoned
+# flagship's 2× LPDDR5X x64 at 100 GB/s) for area we can afford.
 #
 # A v2-stretch option (LPDDR5X x32 PHY) is documented at the bottom of this
 # file: pushes the largest reasonable model to 7-8B at 5 tok/s, but compute-
 # bottlenecked rather than bandwidth-bottlenecked, and forces near-zero
 # on-die KV scratchpad. Higher risk; documented for evaluation.
 #
-# Tape-out via IMEC / Europractice mini@sic 2.0 at TSMC N16FFC, $60-100K
+# Tape-out via IMEC / Europractice mini@sic 2.0 at TSMC 16nm FinFET (N16FFC), $60-100K
 # shuttle range. Earlier candidates "Lambda v1" (coprocessor) and "Lambda v3"
 # (all-SRAM 2-10M-param) are retired; this file is the only chip target.
 # Iteration history lives in STATUS.md.
@@ -29,7 +39,7 @@ metadata:
   project: Longhorn Silicon
   chip_codename: Lambda
   arch_id: Lambda
-  arch_name: Lambda — standalone 3-5B-class transformer accelerator at 4 mm²
+  arch_name: Lambda — standalone ≤1.5B-parameter transformer accelerator at 4 mm² (validated on Qwen2-1.5B)
   document: arch.yml
   version: 0.3-clean                                           # after 2026-05-14 audit + bug fixes
   created: 2026-04-26
@@ -39,10 +49,9 @@ metadata:
   status: canonical_arch_spec
   one_line_summary: >
     Standalone end-to-end transformer accelerator at 4 mm² with LPDDR5X x16,
-    8×8 MatE, KCE-mini (TurboQuant 16-pt), 0.8 MB SRAM. Targets 3-5B-class
-    models (3B at 8 tok/s; 4B at 6 tok/s; 5B at ~5 tok/s borderline). Same
-    model class as the abandoned 25 mm² flagship, in 1/6 the area, at 1/5
-    the cost.
+    8×8 MatE, KVE (ChannelQuant KV codec), 0.8 MB SRAM. Targets up to 1.5B
+    parameters, validated on Qwen2-1.5B. Serves this model class standalone
+    in 1/6 the area and 1/5 the cost of the abandoned 25 mm² flagship.
   companions:
     - STATUS.md                                    # iteration history, open questions, decisions
     - dataflow_walkthrough.md                      # unit-by-unit teaching doc
@@ -60,24 +69,28 @@ metadata:
 definitive_features_and_blocks:
 
   what_v2_is_in_one_sentence: |
-    A standalone open-source 4 mm² transformer-decoder ASIC at TSMC N16FFC
-    that runs 3-5B-class W4A8 LLMs (Llama-3.2-3B, Mistral-NeMo-3B, Qwen2.5-3B,
-    Phi-3.5-mini) at 6-8 tok/s decode in a ~2.6-3.3 W envelope, with TurboQuant
-    KV compression in silicon. Plugs into any modern laptop or dev board via
-    PCIe Gen3 x1 on M.2 2280 form factor. Long-context support up to 32K via
-    LPDDR streaming: low-KV-head models (Qwen2.5-3B at 2 heads) stay above
-    5 tok/s even at 32K; 8-KV-head models drop toward threshold past 16K.
+    A standalone open-source 4 mm² transformer-decoder ASIC at TSMC 16nm FinFET
+    (N16FFC) that runs up to 1.5B-parameter W4A8 LLMs (validated on Qwen2-1.5B)
+    at 6-8 tok/s decode in a ~2.6-3.3 W envelope, with ChannelQuant KV
+    compression in silicon (KVE block; per-channel INT4 K + per-token INT4 V +
+    static top-k FP16 outlier lane; ~3.8x at ~4 bits/value). Plugs into any
+    modern laptop or dev board via PCIe Gen3 x1 on M.2 2280 form factor.
+    Long-context support up to 32K via LPDDR streaming: low-KV-head models
+    stay above 5 tok/s even at 32K; higher-KV-head models drop toward
+    threshold past 16K.
 
-  # Top-level naming convention (adopted from Chaithu's adaptive-precision-attention
-  # framework — see docs/reconciliation_chaithu.md when written). Lambda preserves
-  # its internal seven-block decomposition (MatE/VecU/KCE-mini/MSC/LSU/HIF/TIU)
-  # but groups them under ACU/MSC/LSU/HIF/TIU at the top level for clarity.
+  # Top-level naming convention follows the canonical four-block taxonomy:
+  # Block 1 Attention Compute Unit (ACU), Block 2 KV Cache Engine (KVE,
+  # ChannelQuant codec — formerly the KCE block), Block 3 Token Importance
+  # Unit (TIU), Block 4 Memory Hierarchy Controller (MHC). Lambda's finer
+  # internal decomposition (MatE/VecU/KVE/MSC/LSU/HIF/TIU) is preserved; the
+  # MSC (Memory Subsystem Controller) here maps to the canonical MHC.
   compute_unit_grouping:
-    ACU:                                                       # Attention Compute Unit (umbrella)
-      members: [MatE, VecU, KCE-mini]
+    ACU:                                                       # Block 1 — Attention Compute Unit (umbrella)
+      members: [MatE, VecU, KVE]                               # KVE (ChannelQuant) = Block 2, formerly KCE-mini
       purpose: All compute operations — dense GEMMs, attention scoring, online softmax, RoPE, RMSNorm, KV compression
-      area_mm2: 0.324                                          # 0.10 + 0.144 + 0.08
-    MSC:                                                       # Memory Subsystem Controller
+      area_mm2: 0.324                                          # 0.10 + 0.144 + 0.08 (KVE 0.08 is legacy TurboQuant-era; pending re-derivation)
+    MSC:                                                       # Memory Subsystem Controller — maps to canonical Memory Hierarchy Controller (MHC, Block 4)
       purpose: LPDDR5X x16 controller + 4-port SRAM crossbar + 128-entry block table + sparse-blocked indexing + TIU read interface
       area_mm2: 0.18
     LSU:                                                       # Layer Sequencer
@@ -133,9 +146,23 @@ definitive_features_and_blocks:
       area_mm2: 0.144
       power_w: 0.16
 
-    - id: KCE
-      name: KV Compression Engine — TurboQuant 16-point Hadamard
+    - id: KVE                                                  # Block 2 — KV Cache Engine (formerly KCE)
+      name: KV Cache Engine (KVE) — ChannelQuant codec
+      codec_of_record: |
+        ChannelQuant (2026-06-22): per-channel INT4 keys (grouped, G=128) +
+        per-token INT4 values + static top-k FP16 outlier-channel lane. Tiers:
+        CQ-8, CQ-4, CQ-4+. ~3.8x KV compression at ~4 bits/value, near-lossless
+        (HellaSwag acc_norm within ~0.4-0.8 pt of FP16 at CQ-4+ on Qwen2-0.5B/
+        1.5B). Recipe follows KIVI (ICML 2024) / KVQuant (2024); Longhorn's
+        contribution is the streaming silicon implementation. Full block lives
+        in the kv-cache-engine repo.
+      legacy_microarch_note: |
+        FLAG: every hardware/PPA field below (hadamard_dim, codebook_centroids,
+        compression_ratio, bpe, modes, area_mm2) is TurboQuant-era and predates
+        the ChannelQuant pivot. These are NOT ChannelQuant internals and are
+        PENDING HUMAN RE-DERIVATION. Do not read them as the current codec.
       function: |
+        [LEGACY TurboQuant description — pending re-derivation for ChannelQuant]
         Walsh-Hadamard rotation + Lloyd-Max codebook quantization on K and V
         as MatE produces them. Inverse path (LUT + reverse Hadamard) on read
         for attention scoring. Multipliers ZERO on the dequant path.
@@ -155,12 +182,15 @@ definitive_features_and_blocks:
         - turboquant_asymmetric_K3_V2 (alt codebook ROM; K @ 4.0 bpe + V @ 3.0 bpe = 3.5 bpe avg, 4.57× — needs separate K/V scratchpad halves)
         - fp4_e2m1_codebook (alt 64-byte ROM with NVFP4 levels; 4.0 bpe same as primary)
         - bypass_fp16 (debug / ablation; 16 bpe, 1× compression)
-      area_mm2: 0.08
-      power_w: 0.05
+      area_mm2: 0.08                                           # LEGACY TurboQuant-era; pending re-derivation for ChannelQuant
+      power_w: 0.05                                            # LEGACY TurboQuant-era; pending re-derivation
       research_significance: |
-        First-silicon implementation of rotation-codebook KV compression
-        (TurboQuant, ICLR'26 arXiv 2504.19874) at a competitive node. Headline
-        research first.
+        First-silicon streaming implementation of the ChannelQuant KV codec
+        (KVE block) — per-channel INT4 K + per-token INT4 V + static top-k FP16
+        outlier lane, recipe following KIVI (ICML 2024) / KVQuant (2024).
+        (The earlier "rotation-codebook / TurboQuant" framing predates the
+        2026-06-22 pivot; TurboQuant, arXiv 2504.19874, remains cited prior
+        work only.)
 
     - id: MSC
       name: Memory Subsystem Controller — single-channel
@@ -387,10 +417,15 @@ definitive_features_and_blocks:
     activation_quantization:
       - INT8 per-token dynamic
     kv_quantization_modes:
-      - turboquant_3bit_16pt_Hadamard (primary, 4.0 bpe effective, 4.0× compression vs FP16)
-      - hadamard_int4_16pt (fallback, 5.0 bpe, 3.2× compression — linear quant)
-      - turboquant_asymmetric_K3_V2 (K @ 4.0 bpe + V @ 3.0 bpe avg 3.5 bpe, 4.57× — production-mode upgrade)
-      - fp4_e2m1_codebook (NVFP4 levels via alt 64-byte ROM; CSR-selectable; 4.0 bpe, 4.0×)
+      # Codec of record (2026-06-22): ChannelQuant, tiers CQ-8 / CQ-4 / CQ-4+.
+      - channelquant_CQ8 (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane)
+      - channelquant_CQ4 (primary; ~3.8× at ~4 bits/value, near-lossless)
+      - channelquant_CQ4_plus (near-lossless tier; HellaSwag acc_norm within ~0.4-0.8 pt of FP16 on Qwen2-0.5B/1.5B)
+      # --- legacy TurboQuant modes below: pre-2026-06-22, pending re-derivation ---
+      - turboquant_3bit_16pt_Hadamard (LEGACY, 4.0 bpe effective, 4.0× vs FP16)
+      - hadamard_int4_16pt (LEGACY fallback, 5.0 bpe, 3.2× — linear quant)
+      - turboquant_asymmetric_K3_V2 (LEGACY; K @ 4.0 bpe + V @ 3.0 bpe avg 3.5 bpe, 4.57×)
+      - fp4_e2m1_codebook (LEGACY; NVFP4 levels via alt 64-byte ROM; 4.0 bpe)
       - bypass_fp16 (debug / ablation; 16 bpe, 1× compression)
     attention_variants_supported:
       - vanilla_multi_head (MHA)
@@ -465,8 +500,8 @@ definitive_features_and_blocks:
 # Why this architecture at 4 mm² — the audit
 # -----------------------------------------------------------------------------
 feasibility_audit:
-  question: "Can 4 mm² hold a STANDALONE end-to-end transformer accelerator at 16nm targeting 3-5B models?"
-  answer: "Yes, with LPDDR5X x16 as the bandwidth tier and tight scope on every block."
+  question: "Can 4 mm² hold a STANDALONE end-to-end transformer accelerator at 16nm targeting up to 1.5B-parameter models (validated on Qwen2-1.5B)?"
+  answer: "Yes, with LPDDR5X x16 as the bandwidth tier and tight scope on every block. (The bandwidth headroom below was derived for the retired 3-5B target and comfortably covers a ≤1.5B target; the specific 4.8B/2.4B figures are pre-pivot and pending re-derivation.)"
 
   bandwidth_decision_is_load_bearing: |
     Decode is bandwidth-bound. Largest_model_GB ≈ bandwidth_GBs × time_per_tok / 2
@@ -476,7 +511,8 @@ feasibility_audit:
       - LPDDR5X x32 (25 GB/s): 5.0 GB → 10B params max (compute-bottlenecked; see stretch §)
     Choosing LPDDR5X x16 over LPDDR4X x16 costs +0.2 mm² PHY area (1.2 vs 1.0
     mm²) and +1 W power (1.5 vs 0.5 W). It DOUBLES the largest serviceable
-    model class. Strict slam dunk for 3-5B target.
+    model class — comfortably covering the ≤1.5B / Qwen2-1.5B target.
+    (Legacy framing said "slam dunk for 3-5B"; retired 2026-06-22.)
 
   key_architectural_decisions:
     - choose_pcie_gen3_x1_not_x4_or_usbc:
@@ -619,7 +655,7 @@ feasibility_audit:
 # Process — same as flagship; reference for shared constants
 # -----------------------------------------------------------------------------
 process:
-  node: TSMC N16FFC
+  node: TSMC 16nm FinFET (N16FFC), via imec / TSMC University Program
   shuttle_program:
     primary: IMEC / Europractice mini@sic 2.0 (TSMC technologies) [C-imec-01]
     secondary: TSMC University FinFET Program via Europractice [C-imec-02]
@@ -643,12 +679,21 @@ process:
       Europractice provides tool access bundled with mini@sic registration.
 
 # -----------------------------------------------------------------------------
-# Target workload — 3-5B-class transformer inference
+# Target workload — up to 1.5B-parameter transformer inference (validated on Qwen2-1.5B; legacy 3-5B tables below pending re-derivation)
 # -----------------------------------------------------------------------------
 target_workload:
+  # PENDING RE-DERIVATION (post-2026-06-22 pivot): the canonical target is now
+  # "up to 1.5B parameters, validated on Qwen2-1.5B". The per-model examples,
+  # decode-throughput tables and capacity_math below are the pre-pivot 3-5B
+  # analysis (and assume the TurboQuant 4.0 bpe codec). They are retained
+  # verbatim as historical derivations and need human re-derivation against
+  # Qwen2-1.5B + ChannelQuant (~4 bits/value). Do not read them as the target.
   primary_model_class:
-    name: 3-5B-parameter dense decoder transformer
+    name: up to 1.5B-parameter dense decoder transformer (validated on Qwen2-1.5B)
+    legacy_class_pre_pivot: 3-5B-parameter dense decoder transformer   # retired 2026-06-22
     examples:
+      - Qwen2-1.5B (validation model; ≤1.5B target)
+      # --- legacy 3-5B example set (pre-pivot; pending re-derivation) ---
       - Llama-3.2-3B (3B params, 28 layers, 8 KV × 128 dim)             # 7.4 tok/s borderline interactive
       - Phi-3.5-mini-instruct (3.8B, 32 layers, 32 KV × 96 dim)         # 6.3 tok/s borderline
       - Qwen2.5-3B (3.1B, 36 layers, 2 KV × 128 dim)                    # 7.7 tok/s + best long-context (2 KV heads → 4× the on-die capacity of 8-head peers; 32K serviceable via LPDDR streaming at ~24 ms/tok overhead)
@@ -656,7 +701,7 @@ target_workload:
       - Gemma-2-2B (2B, 26 layers, 4 KV × 256 dim)                      # 11.9 tok/s comfortable
       - Llama-3.2-1B (1.2B, 16 layers, 8 KV × 64 dim)                   # 19.3 tok/s; uses bandwidth headroom
       - SmolLM2-360M (360M, 30 layers, 5 KV × 64 dim)                   # 66 tok/s
-    parameters: 1B_to_5B
+    parameters: up_to_1_5B                                     # canonical target (validated on Qwen2-1.5B); legacy analysis below assumed 1B_to_5B
     weight_bits_target: 4
     weight_bytes_total_w4: 0.5_to_2.5_GB
     activation_bits: 8
@@ -688,16 +733,17 @@ target_workload:
       - prefill_>256_tokens (compute fabric is small)
 
   why_this_workload: |
-    The 3-5B class is the deployable on-device LLM regime in 2026-28. Llama-3.2
-    family, Phi-3.5, Qwen2.5, Mistral-NeMo, Gemma-2 are all in this band.
-    Apple Intelligence, Google Gemini Nano, Microsoft Copilot+ all target
-    similar scales. Lambda v2 is the **first open-source academic standalone
-    accelerator** at this scale — closest commercial cousins are Apple Neural
-    Engine and Qualcomm Hexagon NPU, both proprietary integrated SoCs.
+    The ≤1.5B class (validated on Qwen2-1.5B) is a deployable on-device LLM
+    regime for 2026-28. Apple Intelligence, Google Gemini Nano, Microsoft
+    Copilot+ target small on-device models. Lambda is the **first open-source
+    academic standalone accelerator** at this scale — closest commercial
+    cousins are Apple Neural Engine and Qualcomm Hexagon NPU, both proprietary
+    integrated SoCs.
 
-    The pitch is **3-5B inference at 3-4 W, standalone, open-source, 4 mm².**
+    The pitch is **≤1.5B inference at 3-4 W, standalone, open-source, 4 mm².**
     Not "the fastest on this workload" (an x86 CPU at 30-50 W is faster) but
     "the smallest, lowest-power, and only open-source option."
+    (Legacy drafts framed this as a "3-5B" pitch; retired 2026-06-22.)
 
   capacity_math:
     # Re-derived 2026-05-14 after audit. Earlier values were 2× over due to a
@@ -939,8 +985,17 @@ blocks:
     risk: medium
 
   - id: kv_compression_engine
-    name: KV Compression Engine (KCE-mini) — 16-point Hadamard
+    name: KV Cache Engine (KVE) — ChannelQuant codec  [id kept for HLS continuity]
+    codec_of_record: |
+      ChannelQuant (2026-06-22): per-channel INT4 K (grouped G=128) + per-token
+      INT4 V + static top-k FP16 outlier-channel lane; tiers CQ-8/CQ-4/CQ-4+;
+      ~3.8x at ~4 bits/value. Full block in the kv-cache-engine repo.
+    legacy_microarch_note: |
+      FLAG: the function/microarchitecture/modes/area fields below are the
+      TurboQuant 16-pt Hadamard / Lloyd-Max design and predate the pivot —
+      pending human re-derivation for ChannelQuant. Not the current codec.
     function: |
+      [LEGACY TurboQuant — pending re-derivation]
       Walsh-Hadamard rotation (16-point, 64 add/sub) + Lloyd-Max codebook
       (8-centroid, 3-bit) + bit-pack with 16-bit FP16 scale per 16-element
       group. 16-point saves ~0.07 mm² vs flagship's 32-point at the cost of
@@ -972,9 +1027,9 @@ blocks:
       - id: bypass_fp16
         bits_per_elem: 16
         compression_ratio: 1.0
-    area_mm2: 0.08
+    area_mm2: 0.08                                             # LEGACY TurboQuant-era; pending re-derivation for ChannelQuant
     verification_tests: 60
-    risk: low                                                  # mostly LASSO inheritance
+    risk: low                                                  # mostly inherited from the 130nm Sky130 track (now the Chipathon repo)
 
   - id: memory_subsystem_controller
     name: Memory Subsystem Controller (MSC)
@@ -1145,10 +1200,14 @@ quantization_strategy:
   activations:
     primary: int8_per_token_dynamic
   kv_cache:
-    primary: turboquant_3bit_with_16pt_hadamard
-    secondary: hadamard_int4_16pt
+    primary: channelquant_CQ4                                  # ChannelQuant: per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane
+    tiers: [CQ-8, CQ-4, CQ-4+]
+    near_lossless_tier: channelquant_CQ4_plus
     bypass: fp16
-    fp4_codebook_mode: optional                                # alt ROM contents
+    legacy_pre_pivot:                                          # retired 2026-06-22; pending re-derivation
+      primary: turboquant_3bit_with_16pt_hadamard
+      secondary: hadamard_int4_16pt
+      fp4_codebook_mode: optional
   attention_compute:
     primary: int8_q_x_int3_compressed_k_with_fp16_softmax_accum
     compressed_domain_scoring: |
@@ -1345,7 +1404,7 @@ verification:
     msc: 50
     lsu: 30
     hif: 25
-  reuse_from_lasso: ~40%
+  reuse_from_130nm_sky130_track: ~40%                          # was "reuse_from_lasso"; 130nm work now in the Chipathon repo
   effective_new_tests: ~180
   estimated_person_months_at_student_velocity: ~28
 
@@ -1440,7 +1499,7 @@ v2_stretch_lpddr5x_x32:
   when_to_NOT_choose_stretch:
     - Cost overage is unfundable
     - PHY integration risk is already maxed out for the team
-    - 3-5B model class is sufficient for the customer wedge
+    - the ≤1.5B model class is sufficient for the customer wedge
     - On-die KV scratchpad (essentially zero in stretch) is required for any reason
 
   recommendation: |
@@ -1456,19 +1515,20 @@ recommendation:
   status: PROPOSED_AMBITIOUS_ALTERNATIVE_TO_V1
   one_line: |
     Choose Lambda v2 if the team can absorb LPDDR PHY integration risk and
-    wants a STANDALONE chip running 3-5B models on-die at 6-8 tok/s.
+    wants a STANDALONE chip running up to 1.5B-parameter models (validated on
+    Qwen2-1.5B) on-die at 6-8 tok/s.
 
   why_v2_at_lpddr5x_x16: |
     The LPDDR5X x16 PHY upgrade vs LPDDR4X x16 doubles bandwidth (12 vs 6 GB/s)
-    for +0.2 mm² die area and +1 W power. This SINGLE CHANGE quadruples the
-    largest serviceable model class — from ~1.2B (LPDDR4X) to ~5B (LPDDR5X x16).
-    At the SAME 4 mm² die. Lambda v2 now serves the same 3-4B model class
-    that the abandoned 25 mm² flagship was targeting at 7-8B — in 1/6 the area
-    and 1/5 the cost. Strict Pareto improvement over the prior LPDDR4X spec.
+    for +0.2 mm² die area and +1 W power, giving comfortable headroom over the
+    ≤1.5B / Qwen2-1.5B target at the SAME 4 mm² die — in 1/6 the area and 1/5
+    the cost of the abandoned 25 mm² flagship. FLAG: the specific model-class
+    figures this paragraph was built on (~1.2B / ~5B / 3-4B / 7-8B) are
+    pre-pivot and pending re-derivation.
 
   why_proceed: |
-    First open-source academic standalone transformer accelerator running
-    3-4B-class models at 4 mm². No prior silicon at this scale + openness +
+    First open-source academic standalone transformer accelerator at 4 mm²
+    (validated on Qwen2-1.5B). No prior silicon at this scale + openness +
     workload class exists. Apple Neural Engine and Qualcomm Hexagon are the
     closest commercial cousins; both proprietary integrated SoCs.
 
@@ -1505,9 +1565,10 @@ risks:
     severity: critical
     description: LPDDR5X x16 PHY integration is unprecedented for the team
     evidence: |
-      Previous tape-out (LASSO) was all-digital via Caravel. v2 introduces
-      LPDDR PHY: clock-domain crossings, reference voltages, calibration
-      loops, analog corner verification.
+      The prior 130nm Sky130 track (now the Chipathon repo; never fabricated)
+      was all-digital via Caravel. v2 introduces LPDDR PHY: clock-domain
+      crossings, reference voltages, calibration loops, analog corner
+      verification.
     mitigation: |
       Mandatory hire/partner with senior PD engineer with FinFET + DDR PHY
       experience. Single biggest non-architectural risk.
@@ -1530,14 +1591,17 @@ risks:
 
   - id: R-Lv2-04
     severity: medium
-    description: 3-5B model class commoditized by mobile SoC NPUs by 2028
+    description: ≤1.5B model class commoditized by mobile SoC NPUs by Lambda tape-out (Summer 2027)
     evidence: |
-      Apple may target 3-4B by 2028; Snapdragon 8 Gen 4 may include 3B-class
-      NPUs. The class may move up to 7-8B by tape-out time.
+      Apple / Snapdragon on-device NPUs already target small on-device models
+      and the commoditized class keeps moving up. FLAG: the specific "3-5B by
+      2028" market framing this risk was written around is retired (target is
+      now ≤1.5B; canonical tape-out is Summer 2027) — the market-timing
+      analysis needs human re-derivation.
     mitigation: |
-      Architecture supports up to 7B with W3 (stretch) or via LPDDR5X x32
-      stretch. Position chip as "smallest viable open standalone accelerator"
-      not "best 3-5B accelerator."
+      Position chip as "smallest viable open standalone accelerator", not
+      "best in a given parameter class." The ≤1.5B / Qwen2-1.5B target is the
+      validation point, not a competitive-perf claim.
 
   - id: R-Lv2-05
     severity: medium
@@ -1570,7 +1634,10 @@ citations:
       year: 2025
       arxiv: 2504.19874
       venue: ICLR 2026
-      notes: Headline algorithm enabling KCE-mini; 3.5 bpe effective at 32-pt; 4.0 bpe at our 16-pt
+      notes: |
+        Cited prior work only. Was the codec of record before the 2026-06-22
+        pivot to ChannelQuant (KVE block). Not the chip's current codec.
+        The ChannelQuant recipe follows KIVI (ICML 2024) and KVQuant (2024).
     C-02:
       title: "FlashAttention-3"
       year: 2024

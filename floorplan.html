@@ -117,12 +117,22 @@
 <h1>Lambda — 4 mm² Standalone Transformer Accelerator</h1>
 <div class="tagline">Longhorn Accelerator for Matrix-Based Dataflow & Attention &nbsp;·&nbsp; Chips, designed at Texas</div>
 <div class="meta">
-  Process: TSMC N16FFC &nbsp;·&nbsp; Die: 2.0 × 2.0 mm = 4 mm² &nbsp;·&nbsp; Off-chip: 1× LPDDR5X-8533 x16 (12 GB/s sustained)
-  <br>Target workload: 3-5B-class transformers (Llama-3.2-3B / Mistral-NeMo-3B / Qwen2.5-3B / Phi-3.5-mini), W4A8 + TurboQuant 3-bit KV (4.0 bpe, 4× vs FP16)
+  Process: TSMC 16nm FinFET (N16FFC), via imec / TSMC University Program &nbsp;·&nbsp; Die: 2.0 × 2.0 mm = 4 mm² &nbsp;·&nbsp; Off-chip: 1× LPDDR5X-8533 x16 (12 GB/s sustained)
+  <br>Target workload: up to 1.5B-parameter transformers, validated on Qwen2-1.5B, W4A8 + ChannelQuant KV (per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane; ~3.8× at ~4 bits/value)
   <br>Shuttle: IMEC / Europractice mini@sic 2.0 (primary) — Muse Semiconductor (US fallback)
   <br>Companions: <code>arch.yml</code> &nbsp;·&nbsp; <code>dataflow_walkthrough.md</code> &nbsp;·&nbsp; <code>STATUS.md</code> &nbsp;·&nbsp; <code>src/</code> (HLS C++)
   <br>Audited 2026-05-14: KV math, KCE bpe, MatE accumulator, headroom claims corrected.
 </div>
+</div>
+
+<div class="callout">
+  <strong>Codec-of-record note (2026-06-22 pivot):</strong> Lambda's KV-cache codec of record is now <strong>ChannelQuant</strong>
+  (per-channel INT4 keys, grouped G=128; per-token INT4 values; static top-k FP16 outlier-channel lane; tiers CQ-8 / CQ-4 / CQ-4+;
+  ~3.8× at ~4 bits/value, near-lossless), packaged as the <strong>KV Cache Engine (KVE)</strong> — full block in the
+  <code>kv-cache-engine</code> repo. The <strong>TurboQuant / 16-pt Walsh-Hadamard / Lloyd-Max KCE</strong> microarchitecture and its
+  derived PPA numbers on this page (0.08 mm² area, 4.0 bpe, centroid indices, butterfly) predate this pivot and are
+  <strong>pending human re-derivation</strong> for ChannelQuant. TurboQuant remains a cited prior work, not the current codec.
+  The per-model workload/capacity tables below assume the retired 3-5B target and legacy codec and are likewise pending re-derivation.
 </div>
 
 <p style="font-size: 15px; color: #555;">
@@ -134,7 +144,7 @@
 
 <div class="accent">
   <strong>What's on-die vs off-chip:</strong> the rectangle labeled "Lambda silicon" is the 4 mm² ASIC we
-  tape out — it contains 9 functional blocks (MatE, VecU, KCE-mini, MSC, LSU, TIU, HIF + SRAM banks + LPDDR PHY) plus an I/O ring. The dark box <em>below</em> the die is the
+  tape out — it contains 9 functional blocks (MatE, VecU, KVE, MSC, LSU, TIU, HIF + SRAM banks + LPDDR PHY) plus an I/O ring. The dark box <em>below</em> the die is the
   <strong>LPDDR5X-8533 DRAM package</strong>, a separate mobile-grade memory chip mounted on the same PCB
   next to Lambda. The "LPDDR5X x16 PHY" block on the bottom edge of our die is just the analog interface
   (data lanes, clocking, calibration) that drives signals out through pad-ring pins, across PCB traces,
@@ -254,10 +264,10 @@
 
   <!-- KCE (16-pt Hadamard): right of MatE, 0.08 mm² = 65 × 80 px -->
   <rect x="325" y="170" width="65" height="80" fill="#bbf7d0" stroke="#15803d" stroke-width="1.5"/>
-  <text x="357" y="195" text-anchor="middle" class="die-block-label" font-size="13">KCE</text>
-  <text x="357" y="213" text-anchor="middle" class="die-block-sub" font-size="9">TurboQuant</text>
-  <text x="357" y="225" text-anchor="middle" class="die-block-sub" font-size="9">16-pt Hadamard</text>
-  <text x="357" y="240" text-anchor="middle" class="die-block-sub" font-size="9">0.08 mm²</text>
+  <text x="357" y="195" text-anchor="middle" class="die-block-label" font-size="13">KVE</text>
+  <text x="357" y="213" text-anchor="middle" class="die-block-sub" font-size="9">ChannelQuant</text>
+  <text x="357" y="225" text-anchor="middle" class="die-block-sub" font-size="9">INT4 K/V + FP16 lane</text>
+  <text x="357" y="240" text-anchor="middle" class="die-block-sub" font-size="9">0.08 mm² (legacy)</text>
 
   <!-- KV scratchpad (0.4 MB): left, near KCE for write path, 0.35 mm² = 145 × 152 px -->
   <rect x="85" y="210" width="145" height="148" fill="#bfdbfe" stroke="#1e40af" stroke-width="2"/>
@@ -380,8 +390,8 @@
   <div class="mono">0.144 mm²</div>
 
   <div class="swatch" style="background: #bbf7d0;"></div>
-  <div><strong>KCE</strong> — TurboQuant: 16-point Walsh-Hadamard + 8-centroid Lloyd-Max + bit-pack</div>
-  <div class="mono">0.08 mm²</div>
+  <div><strong>KVE</strong> — KV Cache Engine (ChannelQuant: per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane). <em>0.08 mm² and the TurboQuant/Hadamard/Lloyd-Max detail are legacy — pending re-derivation.</em></div>
+  <div class="mono">0.08 mm²*</div>
 
   <div class="swatch" style="background: #cbd5e1;"></div>
   <div><strong>MSC</strong> — single LPDDR5X x16 controller, 4-port SRAM crossbar, 128-entry block table</div>
@@ -426,11 +436,11 @@
 <tbody>
 <tr><td>Matrix Engine (MatE) — 8×8 INT8×INT4</td><td class="num">0.10</td><td class="num">2.5%</td><td>64 PEs, 0.13 TOPS at 1 GHz</td></tr>
 <tr><td>Vector Unit (VecU) — 8-lane SIMD</td><td class="num">0.144</td><td class="num">3.6%</td><td>online softmax, RoPE, RMSNorm, SiLU</td></tr>
-<tr><td>KV Compression Engine (KCE)</td><td class="num">0.08</td><td class="num">2.0%</td><td>16-pt Hadamard + Lloyd-Max codebook</td></tr>
+<tr><td>KV Cache Engine (KVE) — ChannelQuant</td><td class="num">0.08*</td><td class="num">2.0%</td><td>ChannelQuant (INT4 K/V + top-k FP16 outlier lane). *0.08 mm² is legacy TurboQuant/Hadamard-era — pending re-derivation.</td></tr>
 <tr><td>Memory Subsystem Controller (MSC)</td><td class="num">0.18</td><td class="num">4.5%</td><td>1× LPDDR5X ctrl + 4-port xbar + block table</td></tr>
 <tr><td>Layer Sequencer (LSU)</td><td class="num">0.10</td><td class="num">2.5%</td><td>32-inst ISA, 4K microcode</td></tr>
 <tr><td>Host Interface (HIF) — PCIe Gen3 x1 / M.2 2280</td><td class="num">0.55</td><td class="num">13.8%</td><td>incl. PCIe PHY (0.35) + controller + doorbell (0.20); JTAG on dedicated pins</td></tr>
-<tr><td>Token Importance Unit (TIU) <strong>NEW</strong></td><td class="num">0.03</td><td class="num">0.8%</td><td>256 B importance SRAM + accumulator; drives MSC eviction + KCE per-block precision</td></tr>
+<tr><td>Token Importance Unit (TIU) <strong>NEW</strong></td><td class="num">0.03</td><td class="num">0.8%</td><td>256 B importance SRAM + accumulator; drives MSC eviction + KVE per-block precision</td></tr>
 <tr><td>SRAM — kv_scratchpad (0.4 MB)</td><td class="num">0.35</td><td class="num">8.8%</td><td>1-port HD; 1638 single-layer tokens for Qwen2.5-3B / 409 for Llama-3.2-3B (4.0 bpe)</td></tr>
 <tr><td>SRAM — activation_buffer (0.3 MB)</td><td class="num">0.26</td><td class="num">6.5%</td><td>2-port; FA working set + QKV scratch</td></tr>
 <tr><td>SRAM — weight_stream_buffer (0.05 MB)</td><td class="num">0.05</td><td class="num">1.3%</td><td>1-port; 40× LPDDR latency-hiding minimum</td></tr>
@@ -558,7 +568,7 @@ The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V fact
 <tr><td>MatE (50% util, bandwidth-bound)</td><td class="num">0.32</td></tr>
 <tr><td>VecU (8 lanes)</td><td class="num">0.16</td></tr>
 <tr><td>SRAM 0.8 MB (50% util)</td><td class="num">0.16</td></tr>
-<tr><td>KCE-mini</td><td class="num">0.05</td></tr>
+<tr><td>KVE (ChannelQuant; 0.05 W legacy)</td><td class="num">0.05</td></tr>
 <tr><td>TIU (Token Importance Unit) <strong>NEW</strong></td><td class="num">0.01</td></tr>
 <tr><td>MSC + LSU</td><td class="num">0.20</td></tr>
 <tr><td>HIF (PCIe Gen3 x1) <strong>REVISED</strong></td><td class="num">0.30</td></tr>
@@ -603,10 +613,11 @@ The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V fact
 <tr><td rowspan="2">Weights</td><td>INT4 per-channel groupwise</td><td class="num">4×</td><td>Primary; W4A8 sweet spot per ACL'25</td></tr>
 <tr><td>INT8 fallback</td><td class="num">2×</td><td>For accuracy-critical layers (logits)</td></tr>
 <tr><td>Activations</td><td>INT8 per-token dynamic</td><td class="num">2×</td><td>SmoothQuant / QServe paradigm</td></tr>
-<tr><td rowspan="5">KV cache</td><td><strong>TurboQuant 3-bit + 16-pt Hadamard</strong></td><td class="num"><strong>3.0×</strong></td><td>Primary mode (KCE-mini)</td></tr>
-<tr><td>Hadamard-INT4 (16-pt)</td><td class="num">3.2×</td><td>Fallback</td></tr>
-<tr><td>Asymmetric K=3 / V=2</td><td class="num">~6×</td><td>Free upgrade — alt codebook ROM, 5 verif tests</td></tr>
-<tr><td>FP4 codebook (NVFP4 levels)</td><td class="num">3.0×</td><td>Free — alt 64-byte ROM; CSR-selectable</td></tr>
+<tr><td rowspan="6">KV cache</td><td><strong>ChannelQuant CQ-4 (primary)</strong></td><td class="num"><strong>~3.8×</strong></td><td>KVE codec of record: per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane; ~4 bits/value, near-lossless</td></tr>
+<tr><td>ChannelQuant CQ-8 / CQ-4+ (tiers)</td><td class="num">—</td><td>Tier set of the KVE codec (CQ-4+ near-lossless)</td></tr>
+<tr><td><em>TurboQuant 3-bit + 16-pt Hadamard (legacy)</em></td><td class="num">3.0×</td><td><em>Pre-pivot; pending re-derivation</em></td></tr>
+<tr><td><em>Hadamard-INT4 (16-pt, legacy)</em></td><td class="num">3.2×</td><td><em>Pre-pivot</em></td></tr>
+<tr><td><em>Asymmetric K=3 / V=2 (legacy)</em></td><td class="num">~6×</td><td><em>Pre-pivot</em></td></tr>
 <tr><td>FP16 bypass</td><td class="num">1×</td><td>Debug / ablation</td></tr>
 <tr><td>Attention scoring</td><td>INT8 Q × INT3 K → FP16 softmax accumulator</td><td>—</td><td>FlashAttention-3 mixed precision</td></tr>
 </tbody>
@@ -663,9 +674,9 @@ The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V fact
 <ol style="font-size: 14px;">
   <li><strong>IMEC / Europractice mini@sic 2.0 quote</strong> for 4 mm² N16FFC Full Block. Email <code>eptsmc@imec.be</code>. Owner: architecture lead. Deadline: 2026-05.</li>
   <li><strong>LPDDR5X x16 PHY quote</strong> from Synopsys (DesignWare) AND Cadence (Denali) at 16nm — write both, compare. Also get a Cadence <strong>LPDDR4X x16</strong> quote as the fallback path with public datasheets. Lock the load-bearing area uncertainty before floorplan freeze. Owner: architecture lead. Deadline: 2026-06.</li>
-  <li><strong>Tool-ramp test chip</strong> — trivial inverter ring oscillator at N16FFC through IMEC mini@sic. Clears DRC/LVS in Cadence Innovus + Calibre flow before Lambda RTL begins. Owner: PD lead. Deadline: 2026-09.</li>
+  <li><strong>Tool-ramp bring-up vehicle</strong> — trivial inverter ring oscillator at TSMC 16nm FinFET (N16FFC) through IMEC mini@sic. Clears DRC/LVS in the all-Cadence Innovus + Pegasus flow (Calibre is NOT on the chamber) before Lambda RTL begins. Owner: PD lead. Deadline: 2026-09.</li>
   <li><strong>Choose primary demo model</strong> — golden-model evaluation; pick Mistral-NeMo-3B vs Llama-3.2-3B vs Qwen2.5-3B as headline target. Owner: architecture lead + ML student. Deadline: 2026-07.</li>
-  <li><strong>Begin HLS C++ implementation</strong> in <code>src/</code>. Cadence Stratus HLS as the synthesis path. Start with MatE PE microarchitecture and KCE-mini Hadamard butterfly — the two long poles. Owner: RTL lead. Deadline: 2026-08.</li>
+  <li><strong>Begin HLS C++ implementation</strong> in <code>src/</code>. Cadence Stratus HLS as the synthesis path. Start with MatE PE microarchitecture and the KVE ChannelQuant datapath — the two long poles. Owner: RTL lead. Deadline: 2026-08.</li>
   <li><strong>Python golden model</strong> — cycle-accurate sim of full v2 dataflow on chosen model. Owner: RTL lead + ML student. Deadline: 2026-10.</li>
 </ol>
 
@@ -674,28 +685,16 @@ The 4,681 figure dropped the K+V factor of 2 AND used 3.5 bpe; with the K+V fact
 <!-- ============================================================== -->
 <!-- PANEL 9: BACK-OF-ENVELOPE TIMELINE -->
 <!-- ============================================================== -->
-<h2>10. Timeline</h2>
+<h2>10. Timeline — canonical Lambda milestones</h2>
 <div class="panel">
 <table>
-<thead><tr><th>Date</th><th>Milestone</th></tr></thead>
+<thead><tr><th>Milestone</th><th>Status / notes</th></tr></thead>
 <tbody>
-<tr><td>2026-04</td><td>v0.3 architecture spec — initial floorplan</td></tr>
-<tr><td>2026-05-14</td><td>v0.3 audit — 8 bugs fixed (see STATUS.md §4); repo restructured to single-arch focus; <strong>TIU block added</strong> (Phase 0.3); HIF revised USB-C 2.0 → PCIe Gen3 x1</td></tr>
-<tr><td>2026-05-17</td><td>Chamber tooling framework v0.1 — <code>lambda-stratus</code> + generic launchers + stub <code>mate/stratus/project.tcl</code>; smoke test passed on ae03ut01. See <code>docs/tools-overview.md</code>.</td></tr>
-<tr><td>2026-05</td><td>IMEC + Muse shuttle quotes</td></tr>
-<tr><td>2026-06</td><td>v1 vs v2 decision; LPDDR PHY quote in</td></tr>
-<tr><td>2026-07</td><td>Primary demo model chosen; Python golden model started</td></tr>
-<tr><td>2026-09</td><td>Tool-ramp test chip taped out at IMEC</td></tr>
-<tr><td>2026-10</td><td>Python golden model running end-to-end on chosen 3B model</td></tr>
-<tr><td>2026-12</td><td>MatE + KCE RTL complete (the long poles)</td></tr>
-<tr><td>2027-03</td><td>VecU + MSC + LSU + HIF RTL complete</td></tr>
-<tr><td>2027-06</td><td>Full-chip integration</td></tr>
-<tr><td>2027-09</td><td>UVM signoff</td></tr>
-<tr><td>2027-12</td><td>Physical design signoff (DRC/LVS/STA clean)</td></tr>
-<tr><td>2028-01</td><td>GDSII submission to IMEC mini@sic 2.0</td></tr>
-<tr><td>2028-04</td><td>Silicon return</td></tr>
-<tr><td>2028-07</td><td>Bring-up demo: Llama-3.2-3B at 7-8 tok/s decode standalone</td></tr>
-<tr><td>2028-09</td><td>Paper submission (DAC / ICCAD / MICRO student session / HotChips)</td></tr>
+<tr><td><strong>Spring 2026 — Charter &amp; tooling</strong></td><td>In progress. Spec + chamber launcher framework (see <code>docs/tools-overview.md</code>); v0.3 audit; TIU block added; HIF PCIe Gen3 x1.</td></tr>
+<tr><td><strong>Fall 2026 — Architecture finalization</strong></td><td>Freeze arch (blocks, KVE ChannelQuant codec, memory hierarchy); Python golden model; shuttle + PHY quotes in.</td></tr>
+<tr><td><strong>Spring 2027 — RTL design freeze</strong></td><td>All blocks RTL-complete; full-chip integration; verification via iverilog + Yosys, Python/C++ reference-model parity, Yosys formal RTL≡netlist equivalence.</td></tr>
+<tr><td><strong>Summer 2027 — Tapeout</strong></td><td>Target tape-out on TSMC 16nm FinFET (N16FFC) via imec / TSMC University Program (IMEC / Europractice mini@sic 2.0). Nothing fabricated yet.</td></tr>
+<tr><td><strong>Post-silicon — bring-up &amp; validation</strong></td><td>Bring-up and validation once silicon is available.</td></tr>
 </tbody>
 </table>
 </div>

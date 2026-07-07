@@ -7,9 +7,11 @@
 
 ---
 
+> **Codec-of-record note (2026-06-22 pivot, added after this doc was written):** Lambda's KV codec of record is now **ChannelQuant** (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; KV Cache Engine / KVE block; full block in the `kv-cache-engine` repo). This **supersedes the TurboQuant premise** that much of this reconciliation is argued around. The TurboQuant-specific reasoning below (Walsh-Hadamard write-time outlier flattening, Lloyd-Max codebook, INT8×INT3 compressed-domain scoring, 4.0 bpe) predates the pivot and is retained as historical context — it is pending human re-derivation and should not be read as Lambda's current codec. TurboQuant is cited prior work only.
+
 ## What this document is
 
-A peer-to-peer technical reconciliation of `LonghornSilicon/adaptive-precision-attention` (your work on the Precision Controller + MAC Array + the broader four-block framework: ACU, KV Cache Engine, Token Importance Unit, Memory Hierarchy Controller) against Lambda's current `arch.yml` spec — the canonical chip target for our 4 mm² TSMC N16FFC tape-out via IMEC mini@sic 2.0.
+A peer-to-peer technical reconciliation of `LonghornSilicon/adaptive-precision-attention` (your work on the Precision Controller + MAC Array + the broader four-block framework: ACU, KV Cache Engine, Token Importance Unit, Memory Hierarchy Controller) against Lambda's current `arch.yml` spec — the canonical chip target for our 4 mm² TSMC 16nm FinFET (N16FFC) tape-out via IMEC mini@sic 2.0. (Lambda's finer taxonomy maps its MSC to the canonical Memory Hierarchy Controller / MHC, and its KVE = your KV Cache Engine block.)
 
 There's a real architectural choice that needs to be made deliberately, and the path Lambda has committed to differs from yours in one important way. This doc lays out what we agree on, where Lambda has chosen differently, and what we'd like to absorb from your work.
 
@@ -101,19 +103,19 @@ We'd love to talk through it. Faculty advisor will schedule a 30-min conversatio
 ## Where Lambda is locked, and where it isn't (for context)
 
 **Locked:**
-- 4 mm² die at TSMC N16FFC via IMEC mini@sic 2.0
-- W4 weights / A8 activations / TurboQuant 4.0 bpe KV
+- 4 mm² die at TSMC 16nm FinFET (N16FFC) via IMEC mini@sic 2.0
+- W4 weights / A8 activations / ChannelQuant KV codec (KVE; per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane)
 - 8×8 MatE INT8×INT4 (no FP16)
 - 8-lane VecU FP16/BF16 (transcendentals + online softmax)
-- KCE-mini 16-pt Walsh-Hadamard + Lloyd-Max
-- MSC PagedAttention 128-entry block table
+- KVE ChannelQuant *(legacy "16-pt Walsh-Hadamard + Lloyd-Max" description pre-pivot; pending re-derivation)*
+- MSC PagedAttention 128-entry block table (canonical Memory Hierarchy Controller / MHC)
 - LSU 32-instruction in-order RISC
 - HIF PCIe Gen3 x1 on M.2 form factor (revised 2026-05-14 from USB-C 2.0)
 - TIU per Phase 0.3 (entropy-driven adaptive precision)
-- Demo target: 3-5B-class transformer decode at 6-8 tok/s
+- Demo target: up to 1.5B-parameter transformer decode (validated on Qwen2-1.5B) at 6-8 tok/s
 
 **Open:**
-- Demo model choice: Llama-3.2-3B vs Mistral-NeMo-3B vs Qwen2.5-3B (gated on ML eval Q3 2026)
+- Demo model choice within the ≤1.5B target (validated on Qwen2-1.5B) (gated on ML eval Q3 2026)
 - LPDDR PHY vendor (Synopsys vs Cadence vs fallback to LPDDR4X) — gated on Q2 2026 quote
 - Whether to add sparse-blocked attention as a second add-on (per literature audit, leaning yes)
 - Specific microcode encoding for VecU + LSU ISA — drafted in `src/isa/` during Phase E

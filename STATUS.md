@@ -1,5 +1,7 @@
 # Lambda — Architecture Status
 
+> **Codec-of-record note (2026-06-22 pivot):** The signed-off KV-cache compression codec is now **ChannelQuant** (per-channel INT4 keys, grouped G=128; per-token INT4 values; static top-k FP16 outlier-channel lane; tiers CQ-8 / CQ-4 / CQ-4+; ~3.8× KV compression at ~4 bits/value, near-lossless), packaged as the **KV Cache Engine (KVE)**. The full block lives in the `kv-cache-engine` repo. The **TurboQuant / Hadamard KCE microarchitecture** and its derived PPA numbers throughout this document predate the 2026-06-22 ChannelQuant pivot and are **pending re-derivation** for ChannelQuant. Where this file still names TurboQuant/16-pt Hadamard/Lloyd-Max/4.0 bpe/KCE, treat it as legacy pending re-derivation; TurboQuant remains a cited prior work only.
+
 **Last updated: 2026-06-06 (chamber tooling v0.4.1: closes v0.4 audit gaps #1/#2/#4 — per-runid Stratus, STATUS markers, Stratus→Genus release contract)**
 
 ## Change log
@@ -21,7 +23,7 @@ This is the single live entry point for Lambda's architecture state. The canonic
 
 ## 1. State in one paragraph
 
-Lambda is a **4 mm² (2×2 mm) standalone transformer-decoder ASIC on TSMC N16FFC**, taped out via IMEC / Europractice mini@sic 2.0 (~$60–100K shuttle, $170–290K total chip cost including PHY IP). It runs **3–5B-class W4A8 LLMs** (Llama-3.2-3B, Mistral-NeMo-3B, Qwen2.5-3B, Phi-3.5-mini) at **6–8 tok/s decode in a ~2.6 W envelope** (~3.3 W peak), with TurboQuant 3-bit KV compression at 4.0 bpe in silicon. **Seven on-die functional blocks** grouped under top-level ACU/MSC/LSU/TIU/HIF: MatE 8×8 INT8×INT4 systolic, VecU 8-lane FP16/BF16 SIMD, KCE-mini 16-pt Hadamard + Lloyd-Max (the three under the ACU umbrella); MSC memory controller with vLLM-style 128-entry block table + sparse-blocked attention CSR; LSU layer sequencer; TIU entropy-based adaptive-precision driver (new 2026-05-14); HIF PCIe Gen3 x1 on M.2 2280 form factor (revised from USB-C 2.0 on 2026-05-14). Plus 0.8 MB SRAM in four banks + LPDDR5X x16 PHY (vendor IP). Tape-out target Q1 2028; demo Q3 2028; paper at DAC/ICCAD/MICRO/HotChips 2028-09.
+Lambda is a **4 mm² (2×2 mm) standalone transformer-decoder ASIC on TSMC 16nm FinFET (N16FFC)**, targeting tape-out via IMEC / Europractice mini@sic 2.0 (~$60–100K shuttle, $170–290K total chip cost including PHY IP). It runs **up to 1.5B-parameter W4A8 LLMs, validated on Qwen2-1.5B**, at **6–8 tok/s decode in a ~2.6 W envelope** (~3.3 W peak), with ChannelQuant KV compression (per-channel INT4 K + per-token INT4 V + static top-k FP16 outlier lane; ~3.8× at ~4 bits/value) in silicon. **Seven on-die functional blocks** grouped under top-level ACU/MSC/LSU/TIU/HIF: MatE 8×8 INT8×INT4 systolic, VecU 8-lane FP16/BF16 SIMD, KVE ChannelQuant KV codec (the three under the ACU umbrella; KVE = Block 2, formerly the KCE block); MSC memory controller (canonical Memory Hierarchy Controller / MHC) with vLLM-style 128-entry block table + sparse-blocked attention CSR; LSU layer sequencer; TIU entropy-based adaptive-precision driver (new 2026-05-14); HIF PCIe Gen3 x1 on M.2 2280 form factor (revised from USB-C 2.0 on 2026-05-14). Plus 0.8 MB SRAM in four banks + LPDDR5X x16 PHY (vendor IP). Canonical schedule: Spring 2026 Charter & tooling (in progress) → Fall 2026 Architecture finalization → Spring 2027 RTL design freeze → **Summer 2027 Tapeout** (TSMC 16nm via imec / TSMC University Program) → Post-silicon bring-up & validation.
 
 ---
 
@@ -29,13 +31,13 @@ Lambda is a **4 mm² (2×2 mm) standalone transformer-decoder ASIC on TSMC N16FF
 
 | Date | Pivot | What we left behind | Why |
 |---|---|---|---|
-| **2025-12** | Project starts as LASSO on SkyWater SKY130A via Caravel | — | Free PDK + open shuttle |
-| **2026-02** | LASSO design space narrows to 4 candidate architectures (A2/A3/A3+/A4) | — | KCE block emerges as the headline IP |
-| **2026-03** | Pivot from SKY130 to TSMC N16FFC, codename Lambda; team retired the "BEVO" working name | LASSO (archived) | SKY130 capacity caps at ~1B-class; Caravel ring overhead at SKY130 is large; 16nm gives 28× density and FinFET energy. **KCE block carries forward intact.** |
-| **2026-04** | Pivot from 25 mm² Lambda flagship to 4 mm² Lambda v2 + v1 dual-candidate at IMEC mini@sic 2.0 | 25 mm² flagship | Flagship shuttle cost ~$400-500K — unfundable on academic timeline; 4 mm² serves the same 3-4B model class at 1/6 area, 1/5 cost via LPDDR5X x16 bandwidth tier |
+| **2025-12** | Project starts on the 130nm Sky130 track (SkyWater Sky130 PDK, via Caravel) | — | Free PDK + open shuttle. This 130nm work now lives in the separate [Chipathon](https://github.com/LonghornSilicon/Chipathon) repo; it was never fabricated. |
+| **2026-02** | 130nm Sky130 design space narrows to 4 candidate architectures (A2/A3/A3+/A4) | — | KV-codec block emerges as the headline IP |
+| **2026-03** | Pivot from Sky130 to TSMC N16FFC, codename Lambda; team retired the "BEVO" working name | 130nm Sky130 track (now in the Chipathon repo) | Sky130 capacity caps at ~1B-class; Caravel ring overhead at Sky130 is large; 16nm gives 28× density and FinFET energy. **KV-codec block carries forward intact.** |
+| **2026-04** | Pivot from 25 mm² Lambda flagship to 4 mm² Lambda v2 + v1 dual-candidate at IMEC mini@sic 2.0 | 25 mm² flagship | Flagship shuttle cost ~$400-500K — unfundable on academic timeline; 4 mm² serves the ≤1.5B model class at 1/6 area, 1/5 cost via LPDDR5X x16 bandwidth tier |
 | **2026-04 → 05** | Three architecture candidates at 4 mm²: v1 (KV coprocessor, no LPDDR), v2 (standalone with LPDDR5X x16), v3 (all-SRAM tiny-LLM, 2-10M params) | — | Each addressed a different demo story / risk profile |
-| **2026-05-13** | **Lambda v2 selected as the headline architecture and overall arch.** v1 and v3 retired. | v1, v3 | v2 is the only path that ships a demo-able standalone 3-5B transformer accelerator without requiring a CPU-runtime software stack (v1) or capping at sub-100M-param models (v3). v1's KCE-only architecture is folded into v2 via the KCE-mini block; v3's all-SRAM idea is preserved as a future low-power variant if a sponsor asks |
-| **2026-05-14** | **Pre-RTL audit completed.** 8 bugs in spec corrected (see §4 below). Repo restructured to single-arch focus. | scripts/v2_design_space, archs/_shared, archs/lasso, PRDs/, roadmap.md, archs.yaml, v1/v3 YAMLs | Single source of truth before HLS work begins |
+| **2026-05-13** | **Lambda v2 selected as the headline architecture and overall arch.** v1 and v3 retired. | v1, v3 | v2 is the only path that ships a demo-able standalone ≤1.5B transformer accelerator without requiring a CPU-runtime software stack (v1) or capping at sub-100M-param models (v3). v1's KV-codec-only architecture is folded into v2 via the KVE block; v3's all-SRAM idea is preserved as a future low-power variant if a sponsor asks |
+| **2026-05-14** | **Pre-RTL audit completed.** 8 bugs in spec corrected (see §4 below). Repo restructured to single-arch focus. | scripts/v2_design_space, archs/_shared, the retired 130nm-track dir (now the Chipathon repo), PRDs/, roadmap.md, archs.yaml, v1/v3 YAMLs | Single source of truth before HLS work begins |
 
 ---
 
@@ -45,10 +47,10 @@ Lambda is a **4 mm² (2×2 mm) standalone transformer-decoder ASIC on TSMC N16FF
 |---|---|---|
 | MatE — 8×8 INT8×INT4 weight-stationary systolic | 0.10 mm² | All GEMMs (Q/K/V proj, FFN, logits) + Q·K^T in output-stationary mode against compressed K. **INT8 × INT4 → 11-bit product (INT16 partial register inside PE) → INT24 K-axis accumulator.** Peak 128 GOPS at 1 GHz. |
 | VecU — 8-lane SIMD with online softmax | 0.144 mm² | RoPE, RMSNorm, SiLU, FlashAttention-3 softmax, residual add, sampling. 1K-inst microcode. |
-| KCE-mini — TurboQuant 16-pt Hadamard | 0.08 mm² | 16-pt Walsh-Hadamard butterfly (64 add/sub) + 8-centroid Lloyd-Max codebook (3-bit) + bit-pack with 16-bit FP16 scale per 16-elem group. **4.0 bpe effective → 4.0× compression vs FP16.** Five CSR-selectable modes including FP4 codebook and asymmetric K3/V2. |
-| MSC — Memory Subsystem Controller | 0.18 mm² | LPDDR5X x16 controller + 4-port SRAM crossbar + 128-entry block table (vLLM-style PagedAttention in silicon) + DMA descriptor FSM. Single-session — no continuous batching, no Tier-3 eviction. |
+| KVE — KV Cache Engine (ChannelQuant; Block 2) | *(0.08 mm² legacy — pending re-derivation)* | **Codec of record: ChannelQuant** — per-channel INT4 keys (grouped, G=128) + per-token INT4 values + static top-k FP16 outlier-channel lane; tiers CQ-8 / CQ-4 / CQ-4+; ~3.8× KV compression at ~4 bits/value, near-lossless. Full block in the `kv-cache-engine` repo. *(The 0.08 mm² area and the 16-pt Walsh-Hadamard butterfly / 8-centroid Lloyd-Max / 4.0 bpe hardware detail below are TurboQuant-era and predate the 2026-06-22 pivot — pending human re-derivation for ChannelQuant.)* Legacy TurboQuant detail: 16-pt Walsh-Hadamard butterfly (64 add/sub) + 8-centroid Lloyd-Max codebook (3-bit) + bit-pack with 16-bit FP16 scale per 16-elem group, 4.0 bpe effective → 4.0× vs FP16. |
+| MSC — Memory Subsystem Controller (maps to canonical Memory Hierarchy Controller / MHC, Block 4) | 0.18 mm² | LPDDR5X x16 controller + 4-port SRAM crossbar + 128-entry block table (vLLM-style PagedAttention in silicon) + DMA descriptor FSM. Single-session — no continuous batching, no Tier-3 eviction. |
 | LSU — Layer Sequencer | 0.10 mm² | In-order RISC, 32-instruction ISA, 4 KB microcode RAM holding pre-compiled model schedule. Single-issue scalar + vector + DMA per cycle. |
-| TIU — Token Importance Unit | 0.03 mm² | Per-block 16-bit attention-entropy accumulator (256 B SRAM); drives MSC eviction (H2O-style) and KCE-mini per-block precision mode. Modeled on arXiv 2604.04722. **NEW 2026-05-14.** |
+| TIU — Token Importance Unit (Block 3) | 0.03 mm² | Per-block 16-bit attention-entropy accumulator (256 B SRAM); drives MSC eviction (H2O-style) and KVE per-block precision mode. Modeled on arXiv 2604.04722. **NEW 2026-05-14.** |
 | HIF — PCIe Gen3 x1 (M.2 2280) | 0.55 mm² | PCIe Gen3 x1 endpoint (~1 GB/s sustained) for CSR access + microcode load + token I/O. M.2 form factor — slot wires 4 lanes, on-die PHY drives x1 (negotiates down). JTAG via dedicated pins. **Revised from USB-C 2.0 on 2026-05-14.** |
 | **On-chip SRAM (0.8 MB)** | 0.71 mm² | kv_scratchpad 0.4 MB · activation_buffer 0.3 MB · weight_stream_buffer 0.05 MB · codebook_const_rom 64 KB |
 | **LPDDR5X x16 PHY** (vendor IP) | 1.20 mm² ±0.3 | Synopsys DesignWare or Cadence Denali; NDA-gated; load-bearing area uncertainty |
@@ -86,6 +88,8 @@ The 2026-05-14 audit (before HLS work begins) caught 8 bugs in the spec. All are
 ---
 
 ## 5. LPDDR5X x16 vs LPDDR4X x16 — the real tradeoff
+
+> **PENDING RE-ANCHOR (post-2026-06-22 pivot):** the model-class arguments in this section are framed around the old 3–5B / 3–4B / 1–2B target and the TurboQuant codec. The canonical target is now **up to 1.5B parameters (validated on Qwen2-1.5B)**, and the codec is ChannelQuant. The bandwidth-vs-model-class reasoning below (4.8B vs 2.4B, "3B chip vs 1B chip") no longer maps cleanly onto a ≤1.5B target and needs human re-derivation. Numbers and model names retained verbatim below as the pre-pivot analysis of record; do not treat them as the current target.
 
 You asked whether to consider Cadence LPDDR4X over Synopsys/Cadence LPDDR5X to get area breathing room + better public datasheets. **My read: it's a defensible Plan B but should not be the primary choice yet.** Here's the math.
 
@@ -152,11 +156,11 @@ In strict order of how much they gate the next decision:
 
 3. **Senior FinFET PHY PD engineer recruited (or partnered).** Hard prerequisite for LPDDR5X path. *Owner: architecture lead + faculty advisor. Deadline: 2026-07.*
 
-4. **Demo target model locked.** Llama-3.2-3B vs Mistral-NeMo-3B vs Qwen2.5-3B. Run Python golden-model quality eval (MMLU, LongBench) at W4A8 + TurboQuant 4.0 bpe. *Owner: ML student. Deadline: 2026-07.*
+4. **Demo target model locked.** Canonical target is up to 1.5B parameters, validated on **Qwen2-1.5B**. Run Python golden-model quality eval (MMLU, LongBench) at W4A8 + ChannelQuant (CQ-4 / CQ-4+ tiers). *Owner: ML student. Deadline: 2026-07.*
 
-5. **Tool-ramp test chip at IMEC mini@sic.** Trivial inverter ring oscillator to clear DRC/LVS in the **Cadence Innovus + Pegasus** flow (all-Cadence chamber; Calibre is NOT installed) before Lambda RTL begins. *Owner: PD lead. Deadline: 2026-09.*
+5. **Tool-ramp bring-up vehicle at IMEC mini@sic.** Trivial inverter ring oscillator to clear DRC/LVS in the **Cadence Innovus + Pegasus** flow (all-Cadence chamber; Calibre is NOT installed) before Lambda RTL begins. *Owner: PD lead. Deadline: 2026-09.*
 
-6. **HLS C++ implementation begins in `src/`.** Cadence Stratus HLS as the synthesis path. MatE PE and KCE-mini Hadamard butterfly are the long poles — start there. Python golden model in parallel for bit-exact reference. *Owner: RTL lead + ML student. Deadline: 2026-08 for first PE.*
+6. **HLS C++ implementation begins in `src/`.** Cadence Stratus HLS as the synthesis path. MatE PE and the KVE ChannelQuant datapath are the long poles — start there. Python golden model in parallel for bit-exact reference. *Owner: RTL lead + ML student. Deadline: 2026-08 for first PE.*
 
 ---
 
@@ -164,13 +168,13 @@ In strict order of how much they gate the next decision:
 
 These are the architecture deep dives queued behind the bug fixes and cleanup. They are scoped in plan-mode (see the next interaction):
 
-- **Critique of teammate's adaptive-precision-attention work** (Precision Controller + MAC Array specs at `LonghornSilicon/adaptive-precision-attention`). The work assumes a heterogeneous INT8/FP16 MAC array with a per-tile precision gate; Lambda's architecture commits to INT8 × INT4 × INT3 (TurboQuant) without an FP16 path in MatE. Reconcile or fork.
+- **Critique of teammate's adaptive-precision-attention work** (Precision Controller + MAC Array specs at `LonghornSilicon/adaptive-precision-attention`). The work assumes a heterogeneous INT8/FP16 MAC array with a per-tile precision gate; Lambda's architecture commits to INT8 × INT4 keys/values under the ChannelQuant KVE codec without an FP16 path in MatE. Reconcile or fork.
 
 - **Attention/FFN mechanism deep dive.** PagedAttention (vLLM), FlashAttention-2/3, sparse-blocked attention, MLA (DeepSeek), GQA, MQA, batched-grouped attention. Lambda currently commits to FA-3 + paged-attention + GQA/MQA via MSC. Audit each for what's actually frontier vs what's reasonable middle ground; identify hardware implications.
 
 - **Etched patent (US 2024/0419516 A1) implications.** Etched splits the systolic array (no previous-token dependency) from a separate self-attention circuit (uses previous-token data). Lambda's MatE multiplexes both via dataflow mode. Is the patent's split right at our scale (4 mm², 64 PEs), or does multiplexing dominate at this die size? Hardware schedule analysis required.
 
-- **Research corpus alignment.** Cross-check our 8 KCE modes against TurboQuant, QuaRot, RotateKV, KVQuant, Oaken, Titanus, GEAR, Lexico. Identify the *next-gen mode* worth adding as a CSR option for the chip's research narrative.
+- **Research corpus alignment.** Cross-check the KVE ChannelQuant modes against KIVI, KVQuant, TurboQuant, QuaRot, RotateKV, Oaken, Titanus, GEAR, Lexico. Identify the *next-gen mode* worth adding as a CSR option for the chip's research narrative.
 
 ---
 
@@ -183,6 +187,8 @@ These are the architecture deep dives queued behind the bug fixes and cleanup. T
 - **The LPDDR PHY tape-out itself.** First FinFET-era PHY for the team. Senior PD engineer or partner is a hard prerequisite (R-Lv2-01). LPDDR4X fallback (§5) materially de-risks but at the cost of model class.
 
 **Architectural / research-claim:**
+
+> **PENDING RE-DERIVATION (post-2026-06-22 pivot):** the two bullets below are written against the TurboQuant/16-pt-Hadamard codec and 3B-class model dimensions (e.g. Llama-3.2-3B FFN K=8192). Under the ChannelQuant codec and the ≤1.5B / Qwen2-1.5B target these need human re-derivation — accumulator-width margins depend on the actual model dims, and the "compressed-domain / rotation-codebook" risk is a TurboQuant-specific claim that does not describe ChannelQuant. Retained verbatim as the pre-pivot analysis.
 
 - **INT24 K-axis accumulator margin is tight at FFN down-projection.** For Llama-3.2-3B (FFN intermediate = 8192, per `dataflow_walkthrough.md` Stage 11), reducing K=8192 INT8×INT4 products has worst-case sum 8192 × 1024 = 8,388,608, exceeding INT24's signed positive max (+8,388,607) by 1 in the asymmetric (−128 × −8) corner. The MatE `accumulator_rationale` field in `arch.yml` cites the K=4096 case where INT24 fits comfortably; K=8192 (the actual FFN-down K for the 3B Llama family) is at the saturation edge. The asymmetric corner is astronomically unlikely on real activations but mathematically real, and the spec rationale should cite the workload's actual K rather than 4096. **Fallback:** INT26 or INT28 K-axis accumulator (logic effectively free at 16nm; cost is wire width on the column-output reduction tree, not gate count). Mitigation: Python numerical sweep against real Llama-3.2-3B FFN-down activations pre-HLS, plus an arch.yml rationale rewrite to cite K=8192. Tracked in `docs/handoff.md` §3.2 #2.
 

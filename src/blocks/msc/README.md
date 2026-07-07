@@ -5,10 +5,10 @@
 ## What this block is
 
 - Single LPDDR5X x16 controller (open-page policy + bank-conflict avoidance + all DRAM timing constraints)
-- 4-port SRAM crossbar (MatE, VecU, KCE, HIF)
+- 4-port SRAM crossbar (MatE, VecU, KVE, HIF)
 - **128-entry block table** — vLLM PagedAttention in silicon. 16 tokens/block × 128 entries → 2K-token KV pages addressable
 - DMA descriptor FSM
-- On-demand KV decompress trigger (cold-page hits route through KCE inverse path)
+- On-demand KV decompress trigger (cold-page hits route through the KVE decode path)
 - Request arbitration priority queue
 - 0.18 mm²; 0.15 W
 

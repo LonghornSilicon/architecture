@@ -16,11 +16,14 @@ This directory holds the headers that define both layers.
 
 ## Status
 
-- [ ] LSU opcode table — *to draft*
-- [ ] VecU microcode format — *to draft*
-- [ ] CSR map — *to draft*
+- [x] LSU opcode table — **draft `lsu-isa-0.1`** in `lsu.h` (32 opcodes, 4 lanes)
+- [ ] VecU microcode format — *to draft* (`vecu_microcode.h`)
+- [x] CSR map — **draft `csr-isa-0.1`** in `csr_map.h` (global / layer / MatE / KVE / TIU / sampling / doorbell)
 - [ ] Assembler / disassembler in `../golden/lsu_asm.py`
 - [ ] Microcode assembler for VecU in `../golden/vecu_asm.py`
+
+**Compiler-facing overview:** [`../../docs/compiler_programming_guide.md`](../../docs/compiler_programming_guide.md)
+ties these headers to the block pipeline and the built KVE/TIU/ACU reference models.
 
 ## Design discussions still open
 

@@ -1,0 +1,65 @@
+# LonghornSilicon — Documentation & ISA Standard
+
+`std-0.1`, 2026-07-18. The conventions every block repo and the architecture hub follow
+so a compiler/verification team can build against the accelerator without reading RTL.
+If you are standing up a new block, this sits alongside
+[`adaptive-precision-attention/docs/new_block_blueprint.md`](https://github.com/LonghornSilicon/adaptive-precision-attention/blob/master/docs/new_block_blueprint.md)
+(which covers the RTL→GDS pipeline); this doc covers what to *write down*.
+
+## 1. The two-repo model
+
+- **Per-block repos** (`adaptive-precision-attention`, `kv-cache-engine`,
+  `token-importance-unit`, …) own the RTL of record, the block's own ISA/interface spec,
+  its reference model, and its paper section.
+- **`architecture`** (this repo, "Lambda") owns the chip-level spec (`arch.yml`), the
+  unified ISA (`src/isa/`), the compiler programming guide (`docs/`), the golden
+  models index (`src/golden/`), and cross-block reconciliation (`STATUS.md`).
+
+The architecture repo **links to** per-block specs; it does not fork them. When a
+block-level fact and `arch.yml` disagree, that is a reconciliation item for `STATUS.md`
+§7 — flag it, don't silently pick one.
+
+## 2. Required documents per block
+
+Every block ships, in its repo, all of:
+
+| Artifact | Path | Purpose |
+|---|---|---|
+| **README** | `README.md` | TL;DR table (what/why/how/verified/status), prior-art delta, chip-diagram placement, reproduce steps. |
+| **ISA / interface spec** | `docs/isa/<block>_isa.{tex,md,pdf}` | Compiler-facing: block overview, op semantics + latency, AXI-Lite/CSR register map, synth params, change log. Versioned `<block>-isa-X.Y`. |
+| **Reference model** | `sw/reference_model/<block>_ref.{py,cpp,hpp}` + `test_*` | Bit-exact vs RTL (and vs each other). The ground truth a compiler develops against. Ships a `test_*` proving parity on golden vectors. |
+| **Compiler-use example** | `sw/reference_model/example_compiler_use.py` | Runnable walkthrough of the surface a backend targets. |
+| **sw overview** | `docs/sw_overview.{tex,pdf}` | How RTL ⇄ reference model ⇄ test vectors ⇄ compiler entry point fit. |
+| **Paper section** | `paper/<block>.{tex,pdf}` | Verification → functional → sweep → Sky130 sign-off → 16FFC projection. |
+| **Findings** | `docs/findings/*.md` | Dated, provenance-bearing negative/positive results. |
+
+## 3. Ground-truth principle
+
+**The reference model is authoritative, not the prose.** Interfaces are pre-tape-out and
+move; the versioned reference model tracks the RTL and is the contract a compiler tests
+against. Every doc that states a numeric interface fact (register offset, format, latency)
+should be derivable from, and consistent with, the reference model / `arch.yml`.
+
+## 4. Versioning
+
+- Per-block ISA: `<block>-isa-MAJOR.MINOR` (e.g. `kv-isa-0.2`, `pc-isa-0.1`, `tiu-isa-0.1`).
+  MINOR = additive/clarifying; MAJOR = breaking interface change. Record in the doc's
+  change log and in `INFO_VERSION`.
+- Unified chip ISA: `lh-isa-MAJOR.MINOR` (compiler guide) with sub-versions `lsu-isa-*`,
+  `csr-isa-*`, `vecu-isa-*` for the individual headers.
+- Never invent hardware numbers (area/power/Fmax/accuracy). Cite the sign-off doc or the
+  measurement; mark unmeasured values **TBD**.
+
+## 5. Numbers & provenance
+
+- Accuracy/area/power come from a committed run (Sky130 metrics.json, a HellaSwag/ppl
+  harness). Link the artifact.
+- Retired approaches stay cited as prior work with a `legacy/*` branch pointer; do not
+  delete history, and do not present retired numbers as current.
+
+## 6. Authorship / CI conventions
+
+- Commit author identity and CI runner conventions are in `new_block_blueprint.md`
+  (§Gotchas). CI gates (functional / synth FF-count / formal equivalence / Sky130
+  sign-off) must be green before a block is "done"; the blueprint's final checklist is
+  the bar.

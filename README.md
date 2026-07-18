@@ -16,6 +16,9 @@ UT Austin AI accelerator project. **Target chip: Lambda — a 4 mm² ASIC on TSM
 | **Visual floorplan + area accounting + workload coverage tables** | [`floorplan.html`](floorplan.html) (open in browser) |
 | **Unit-by-unit dataflow walkthrough (teaching doc)** | [`dataflow_walkthrough.md`](dataflow_walkthrough.md) |
 | **Machine-readable spec with every number** | [`arch.yml`](arch.yml) |
+| **Build a compiler backend (unified ISA + what to emit)** | [`docs/compiler_programming_guide.md`](docs/compiler_programming_guide.md) |
+| **Chip ISA headers (LSU opcodes, CSR map)** | [`src/isa/`](src/isa/) |
+| **Org documentation & ISA standard** | [`docs/documentation_standard.md`](docs/documentation_standard.md) |
 | **HLS C++ implementation (Cadence Stratus path)** | [`src/`](src/) |
 
 Start with `STATUS.md`; then `floorplan.html` for the visual; then `dataflow_walkthrough.md` if you want to follow a single decode token through every block; then `arch.yml` for the authoritative numbers.

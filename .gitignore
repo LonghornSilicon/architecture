@@ -55,3 +55,4 @@ mmmc*/
 
 # Local Claude Code config and skills (per-developer, not shared)
 .claude/
+block_repos/

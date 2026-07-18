@@ -19,6 +19,16 @@ The architecture repo **links to** per-block specs; it does not fork them. When 
 block-level fact and `arch.yml` disagree, that is a reconciliation item for `STATUS.md`
 §7 — flag it, don't silently pick one.
 
+**Automated drift check.** Because the hub restates block facts (codec, tiers, params,
+sign-off numbers, precision path), it drifts as blocks change. The
+`Architecture Drift Check` workflow (`.github/workflows/architecture-drift-check.yml`)
+runs Claude nightly (and on demand) over the block repos vs the hub and opens/updates/
+closes a single GitHub issue (`🔄 Architecture drift check`) listing concrete divergences
+with suggested fixes. **Setup:** add the repo/org secret `ANTHROPIC_API_KEY`. Block-repo
+pushes can additionally trigger it via `repository_dispatch` (`type: block-updated`) once
+a cross-repo token is wired. The block repos remain the source of truth — the check
+flags stale hub claims for a human to reconcile; it does not auto-edit the spec.
+
 ## 2. Required documents per block
 
 Every block ships, in its repo, all of:

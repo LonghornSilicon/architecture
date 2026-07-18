@@ -1,0 +1,53 @@
+name: Architecture Drift Check
+
+# Keeps the architecture hub (arch.yml, compiler guide, STATUS, dataflow) honest
+# against the per-block repos, which are the source of truth for their own facts.
+# Runs Claude over both and opens/updates/closes a single GitHub issue.
+#
+# Setup: add the org/repo secret ANTHROPIC_API_KEY (Console → API keys).
+# Triggers: nightly + manual. Block-repo pushes can also ping this via
+# `repository_dispatch` (type: block-updated) once a cross-repo token is wired.
+
+on:
+  schedule:
+    - cron: "0 8 * * *"        # 08:00 UTC daily
+  workflow_dispatch:
+  repository_dispatch:
+    types: [block-updated]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: architecture-drift-check
+  cancel-in-progress: true
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout architecture hub
+        uses: actions/checkout@v4
+
+      - name: Clone block repos (source of truth)
+        run: |
+          mkdir -p block_repos
+          for r in adaptive-precision-attention kv-cache-engine token-importance-unit; do
+            git clone --depth 1 "https://github.com/LonghornSilicon/$r.git" "block_repos/$r"
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Anthropic SDK
+        run: pip install --quiet anthropic
+
+      - name: Run drift check
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python .github/scripts/drift_check.py

@@ -108,17 +108,31 @@ definitive_features_and_blocks:
     # Seven-block transformer-accelerator pattern, scaled to 4 mm²
     # (MatE/VecU/KVE under ACU umbrella + MSC + LSU + HIF + TIU)
     - id: MatE
-      name: Matrix Engine — 8×8 INT8×INT4 weight-stationary systolic
+      name: Matrix Engine — 8×8 heterogeneous INT8×INT4 + FP16 weight-stationary systolic
       function: |
         All dense GEMMs in the transformer: Q/K/V projections, attention output,
         FFN up/down, logits projection. Also runs Q·K^T attention scoring in
         output-stationary mode. Under ChannelQuant, K is dequantized per-channel
         by the KVE (INT4_code · FP16_scale, + FP16 replay for outlier channels)
         before the score matmul — there is no compressed-domain / raw-index read
-        path.
+        path. The attention P·V (and optionally Q·K^T) runs at INT8 OR FP16,
+        selected PER TILE by the ACU precision controller.
       pe_count: 64
       pe_op_weight_matmul: INT8 (act) × INT4 (wt) → 11-bit product → INT24 K-axis accumulator
       pe_op_attention_score: INT8 (Q) × dequantized K (per-channel INT4·FP16 → FP16) → INT24 K-axis accumulator
+      pe_op_attention_pv: |
+        P·V accumulation runs at INT8 (softmax probs × INT8 V) OR FP16
+        (FP16 × FP16 → FP32 accumulate), selected PER TILE by the ACU precision
+        controller. The FP16 path is a heterogeneous MAC mode in the same array,
+        matching the adaptive-precision-attention block's MAC array (mac_array_ref).
+      precision_control: |
+        Per-tile INT8/FP16 gate from the ACU precision controller
+        (adaptive-precision-attention repo): max(|s|)·N > 10·sum(|s|) → FP16, else
+        INT8 (precision_controller_ref.py, 143/143 bit-exact vs RTL). Weight / FFN
+        GEMMs stay W4A8 (INT8×INT4); only the attention tiles the gate flags
+        escalate to FP16. This COMMITS the FP16 MAC path and resolves the earlier
+        "no FP16 path in MatE" reconciliation item (STATUS §7); decided 2026-07-18.
+        Area/power delta of the FP16 mode is TBD (pending re-synthesis).
       accumulator_rationale: |
         INT8 × INT4 = 7-bit signed × 3-bit signed = 10-bit signed product
         (max |−128 × −8| = 1024 in the corner case). Reduction along K-axis
@@ -139,6 +153,7 @@ definitive_features_and_blocks:
         - Weight-stationary primary dataflow (output-stationary CSR alt for Q·K^T)
         - 1.6× compute headroom over bandwidth-bound floor across all reasonable models
         - K dequantized per-channel by KVE (INT4·FP16) before Q·K^T scoring (no compressed-domain read path)
+        - Heterogeneous INT8 + FP16 MAC — attention P·V routes per-tile via the ACU precision controller (FP16 for peaked tiles, INT8 otherwise); weight/FFN GEMMs stay INT8×INT4. Committed 2026-07-18, resolving the "no-FP16-path" reconciliation (STATUS §7); the precision controller + MAC array RTL are in the adaptive-precision-attention repo (Sky130-signed-off).
 
     - id: VecU
       name: Vector Unit — 8-lane SIMD with online softmax

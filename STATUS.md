@@ -168,7 +168,7 @@ In strict order of how much they gate the next decision:
 
 These are the architecture deep dives queued behind the bug fixes and cleanup. They are scoped in plan-mode (see the next interaction):
 
-- **Critique of teammate's adaptive-precision-attention work** (Precision Controller + MAC Array specs at `LonghornSilicon/adaptive-precision-attention`). The work assumes a heterogeneous INT8/FP16 MAC array with a per-tile precision gate; Lambda's architecture commits to INT8 × INT4 keys/values under the ChannelQuant KVE codec without an FP16 path in MatE. Reconcile or fork.
+- **~~Adaptive-precision reconciliation~~ — RESOLVED 2026-07-18.** The precision-controller + MAC-array work (`LonghornSilicon/adaptive-precision-attention`) assumes a heterogeneous INT8/FP16 MAC with a per-tile gate. Earlier drafts had MatE as INT8×INT4 only. **Decision: MatE gains the FP16 MAC path** — weight/FFN GEMMs stay W4A8 (INT8×INT4), but attention `P·V` routes per-tile INT8/FP16 via the ACU precision controller (FP16 for peaked tiles). See `arch.yml` `matrix_engine` (`pe_op_attention_pv`, `precision_control`), compiler guide §6, and `csr_map.h` `mate_precision` (default `adaptive`). Remaining: re-synthesize MatE with the FP16 mode to measure the area/power delta (TBD).
 
 - **Attention/FFN mechanism deep dive.** PagedAttention (vLLM), FlashAttention-2/3, sparse-blocked attention, MLA (DeepSeek), GQA, MQA, batched-grouped attention. Lambda currently commits to FA-3 + paged-attention + GQA/MQA via MSC. Audit each for what's actually frontier vs what's reasonable middle ground; identify hardware implications.
 

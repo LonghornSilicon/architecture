@@ -120,30 +120,35 @@ A head is `[T, D]` FP16 (`D`=head dim). Full C++ structs:
 
 ---
 
-## 6. Precision model (and the open reconciliation)
+## 6. Precision model
 
-**Canonical MatE datapath** (`arch.yml` `matrix_engine`): projections and FFN are
-**INT8 activation × INT4 weight → INT24 accumulator** (W4A8). Attention scores are
-**INT8 Q × per-channel-dequantized FP16 K → INT24**. **There is no FP16×FP16 MAC path in
-MatE.** FP16 lives only in the VecU (softmax, norms) and in the KVE outlier lane / scales.
+**MatE datapath** (`arch.yml` `matrix_engine`). MatE is a **heterogeneous INT8 + FP16**
+MAC array:
 
-**The ACU precision-controller proposal** (`adaptive-precision-attention`, block built +
-Sky130-signed-off as a standalone unit) adds a per-tile INT8-vs-FP16 *gate*
-(`max(|s|)·N > 10·sum(|s|)` → FP16). That assumes a heterogeneous INT8/FP16 MAC —
-**which the canonical MatE does not have.** This is an **open ISA decision** (`STATUS.md`
-§7, "reconcile or fork"). The two coherent resolutions the compiler guide must be able to
-express, both reserved in `MATE_MODE.precision`:
+- **Weight / FFN GEMMs** — **INT8 activation × INT4 weight → INT24 accumulator** (W4A8).
+  Always INT8×INT4; no per-tile choice.
+- **Attention scores** `Q·Kᵀ` — **INT8 Q × per-channel-dequantized FP16 K → INT24**.
+- **Attention `P·V`** — **INT8 OR FP16**, chosen **per tile** by the **ACU precision
+  controller** (`max(|s|)·N > 10·sum(|s|)` → FP16, else INT8). The FP16 path is
+  `FP16×FP16 → FP32-accumulate` in the same array.
 
-- **`static_w4a8`** (canonical): all matmuls INT8×INT4 / INT8×dequant-K; no per-tile
-  precision field. Simplest; matches the taped-out MatE.
-- **`adaptive`** (ACU line): a per-tile precision bit, produced at runtime by the
-  precision controller or baked by the compiler from an offline calibration pass. Requires
-  an FP16 escape in the MAC (a MatE change) — **not yet committed to Lambda silicon.**
+**This is committed** (decided 2026-07-18; resolves the former `STATUS.md` §7 "no FP16
+path" reconciliation — MatE gains the FP16 escape rather than dropping the precision
+gate). The controller + MAC-array RTL live in `adaptive-precision-attention` (both
+Sky130-signed-off); `precision_controller_ref.py` is 143/143 bit-exact vs its RTL and is
+the calibration tool.
 
-Until this is resolved, a backend should emit `static_w4a8` for Lambda-of-record and treat
-the precision-controller gate as a *scheduling hint* (which tiles a future FP16-capable
-MatE would upgrade). The precision-controller reference model
-(`precision_controller_ref.py`, 143/143 vs its RTL) is the tool for that calibration.
+The compiler selects the policy through `MATE_MODE.precision`:
+
+- **`adaptive`** (default): the precision controller drives the per-tile INT8/FP16
+  decision at runtime from the scores — the compiler just enables it. On Qwen the gate
+  routes ~99.99% INT8 (INT8 `P·V` is near-lossless there); the FP16 escape catches the
+  rare peaked tile.
+- **`static_w4a8`**: force INT8 `P·V` everywhere (skip the gate) — smallest energy,
+  for workloads a calibration pass shows are fully INT8-safe.
+
+FP16 mode area/power delta is TBD pending re-synthesis; functionally, the full
+three-block stack with the gate active holds Δ−0.031 vs FP16 on Qwen2-0.5B (§7).
 
 ---
 

@@ -65,9 +65,11 @@
 
 /* ---- field enums ---- */
 enum mate_precision {           /* CSR_MATE_MODE[2:1] — see compiler guide §6      */
-    PREC_STATIC_W4A8 = 0,       /* INT8 act × INT4 wt / INT8 Q × dequant-K; silicon */
-    PREC_ADAPTIVE    = 1,       /* per-tile INT8/FP16 gate; RESERVED, needs MatE
-                                   FP16 escape — OPEN reconciliation (STATUS §7)     */
+    PREC_ADAPTIVE    = 0,       /* DEFAULT: per-tile INT8/FP16 gate on P·V from the
+                                   ACU precision controller (FP16 for peaked tiles).
+                                   Committed 2026-07-18; MatE has the FP16 MAC path.  */
+    PREC_STATIC_W4A8 = 1,       /* force INT8 P·V everywhere (skip the gate); for
+                                   calibration-proven INT8-safe workloads             */
 };
 enum tiu_mode {                 /* CSR_TIU_MODE[1:0]                                */
     TIU_OFF = 0,

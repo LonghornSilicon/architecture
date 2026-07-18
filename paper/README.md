@@ -43,7 +43,7 @@ The paper is organized as IEEEtran conference format, 6–9 pages double-column:
 | 1. Introduction | The small-model (≤1.5 B, validated on Qwen2-1.5B) on-device deployment regime; the open-source gap; contributions |
 | 2. Background | FlashAttention, PagedAttention, KV compression (KIVI/KVQuant), attention-weight eviction |
 | 3. Architecture | Block-by-block: ACU (MatE/VecU/KVE ChannelQuant), MSC, LSU, **TIU**, HIF |
-| 4. Dataflow & Quantization | Token-through-chip walk; why no FP16 multiplier in MatE |
+| 4. Dataflow & Quantization | Token-through-chip walk; adaptive precision — the per-tile FP16 P·V path in MatE |
 | 5. Implementation | Process, area accounting, power, pre-RTL audit |
 | 6. Performance | Decode tok/s vs model size; LPDDR5X-vs-LPDDR4X PHY tradeoff |
 | 7. Discussion | What we excluded and why; Etched-patent IP clearance; risks |

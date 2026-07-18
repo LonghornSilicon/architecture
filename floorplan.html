@@ -255,7 +255,7 @@
   <!-- MatE (8x8 PE array): center-upper, 0.10 mm² = 80 × 80 px -->
   <rect x="240" y="170" width="80" height="80" fill="url(#sysolicPE)" stroke="#dc2626" stroke-width="1.5"/>
   <text x="280" y="200" text-anchor="middle" class="die-block-label" fill="#dc2626" font-size="14">MatE</text>
-  <text x="280" y="215" text-anchor="middle" class="die-block-sub" font-size="9">8×8 PEs · INT8×INT4</text>
+  <text x="280" y="215" text-anchor="middle" class="die-block-sub" font-size="9">8×8 PEs · INT8×INT4 + FP16 (P·V)</text>
   <text x="280" y="225" text-anchor="middle" class="die-block-sub" font-size="9">→ INT24 K-axis acc</text>
   <text x="280" y="237" text-anchor="middle" class="die-block-sub" font-size="9">0.13 TOPS · 0.10 mm²</text>
 
@@ -385,7 +385,7 @@
 <!-- Legend -->
 <div class="legend">
   <div class="swatch" style="background: url(#sysolicPE), #fee2e2;"></div>
-  <div><strong>MatE</strong> — 8×8 INT8×INT4 weight-stationary systolic, 64 PEs, 0.13 TOPS at 1 GHz</div>
+  <div><strong>MatE</strong> — 8×8 INT8×INT4 weight-stationary systolic (+ per-tile FP16 P·V mode), 64 PEs, 0.13 TOPS at 1 GHz</div>
   <div class="mono">0.10 mm²</div>
 
   <div class="swatch" style="background: #fed7aa;"></div>
@@ -437,7 +437,7 @@
 <tr><th>Component</th><th>Area (mm²)</th><th>% of die</th><th>Notes</th></tr>
 </thead>
 <tbody>
-<tr><td>Matrix Engine (MatE) — 8×8 INT8×INT4</td><td class="num">0.10</td><td class="num">2.5%</td><td>64 PEs, 0.13 TOPS at 1 GHz</td></tr>
+<tr><td>Matrix Engine (MatE) — 8×8 INT8×INT4 + FP16 (P·V)</td><td class="num">0.10</td><td class="num">2.5%</td><td>64 PEs, 0.13 TOPS at 1 GHz; INT8×INT4 for weights, per-tile FP16 P·V escape (area delta TBD, pending re-synthesis)</td></tr>
 <tr><td>Vector Unit (VecU) — 8-lane SIMD</td><td class="num">0.144</td><td class="num">3.6%</td><td>online softmax, RoPE, RMSNorm, SiLU</td></tr>
 <tr><td>KV Cache Engine (KVE) — ChannelQuant</td><td class="num">TBD*</td><td class="num">TBD</td><td>ChannelQuant (per-channel INT4 K + per-token INT4 V + top-k FP16 outlier lane). *Area TBD — pending re-measurement for ChannelQuant; totals below hold 0.08 as a placeholder only.</td></tr>
 <tr><td>Memory Subsystem Controller (MSC)</td><td class="num">0.18</td><td class="num">4.5%</td><td>1× LPDDR5X ctrl + 4-port xbar + block table</td></tr>

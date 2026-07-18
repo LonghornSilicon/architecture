@@ -1,13 +1,14 @@
-# MatE — Matrix Engine (8×8 INT8×INT4 systolic)
+# MatE — Matrix Engine (8×8 INT8×INT4 + FP16 (P·V) systolic)
 
 **Spec source:** `../../../arch.yml` block `matrix_engine` (lines look for `id: matrix_engine`).
 
 ## What this block is
 
-- 8×8 grid = 64 INT8×INT4 PEs at 1 GHz → 128 GOPS peak, 76.8 GOPS sustained at 60% util
-- Weight-stationary primary dataflow (Q/K/V proj, FFN, logits)
+- 8×8 grid = 64 heterogeneous INT8 + FP16 PEs at 1 GHz → 128 GOPS peak, 76.8 GOPS sustained at 60% util. The array is **INT8×INT4 for weight/FFN GEMMs**, with an **FP16 MAC path used per-tile for the P·V matmul** (see below). *(Area/power delta of the FP16 mode is TBD, pending re-synthesis.)*
+- Weight-stationary primary dataflow (Q/K/V proj, FFN, logits) — always INT8×INT4
 - Output-stationary alt dataflow for Q·K^T (Q pinned, K streams from kv_scratchpad)
-- Q·K^T scoring on **per-channel-dequantized K**: under the ChannelQuant codec of record the KVE reconstructs K as `INT4_code · FP16_scale` (+ FP16 replay for the k=2 outlier channels) **before** the score matmul — there is no compressed-domain / raw-index read path.
+- Q·K^T scoring on **per-channel-dequantized K**: under the ChannelQuant codec of record the KVE reconstructs K as `INT4_code · FP16_scale` (+ FP16 replay for the k=2 outlier channels) **before** the score matmul — there is no compressed-domain / raw-index read path. Q·K^T stays INT8×(dequantized FP16 K).
+- **Per-tile INT8/FP16 P·V matmul.** The attention P·V product routes each tile to the INT8 path or the FP16 MAC path, selected by the **ACU precision controller** (`max(|s|)·N > 10·Σ(|s|)` → FP16, else INT8; peaked-attention tiles escalate to FP16). The controller + FP16 MAC-array RTL are the Sky130-signed-off `adaptive-precision-attention` block.
 - **INT16 partial-product register inside each PE; INT24 K-axis accumulator at column output** (correction from earlier "INT16 accumulator" spec bug — see `STATUS.md` §4 #3). *(Accumulator margin was derived from the retired 3B dims; TBD, pending re-derivation for ChannelQuant / Qwen2-1.5B.)*
 - 0.10 mm² target at 16nm; 0.32 W at 50% util
 

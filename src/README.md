@@ -32,7 +32,7 @@ src/
 
 ## Recommended build order (long poles first)
 
-1. **MatE PE microarchitecture** — INT8×INT4 multiplier + INT16 partial-product register + INT24 K-axis accumulator. The single most-replicated piece (64 PEs). Get this right and the rest of MatE composes trivially. Validate gate count and timing closure at 1 GHz, 16nm, against `arch.yml` MatE block.
+1. **MatE PE microarchitecture** — INT8×INT4 multiplier + FP16 MAC (per-tile P·V mode) + INT16 partial-product register + INT24 K-axis accumulator. The array is INT8×INT4 for weight/FFN GEMMs, with an FP16 P·V mode selected per tile by the ACU precision controller. The single most-replicated piece (64 PEs). Get this right and the rest of MatE composes trivially. Validate gate count and timing closure at 1 GHz, 16nm, against `arch.yml` MatE block.
 2. **KVE ChannelQuant datapath** — the headline research IP (KV Cache Engine; per-channel INT4 K grouped G=128 + D FP16 scales + per-token INT4 V + static top-k k=2 FP16 outlier lane; tiers CQ-8/CQ-4/CQ-4+; one serialized fp16 divide cone across D channels). Validate bit-exactly against the Python golden in `golden/kce.py`. *(The `kce.*` file names and the legacy Hadamard/codebook HLS in `blocks/kce/` are kept for HLS continuity; ChannelQuant reimplementation pending. Block PD numbers are TBD, pending re-measurement.)*
 3. **VecU lane + online-softmax microcode + TIU update microcode** — 16-bit FP/BF SIMD lane with shared transcendental LUTs. Microcoded; ~1K-inst instruction memory. Online softmax microcode is the first non-trivial program; the TIU importance-broadcast op piggybacks on the same softmax loop.
 4. **TIU** — Token Importance Unit, 256 B importance SRAM + accumulator + threshold register. Smallest block; can build in parallel with the KVE.

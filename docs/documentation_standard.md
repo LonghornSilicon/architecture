@@ -6,6 +6,22 @@ If you are standing up a new block, this sits alongside
 [`attention-compute-unit/docs/new_block_blueprint.md`](https://github.com/LonghornSilicon/attention-compute-unit/blob/master/docs/new_block_blueprint.md)
 (which covers the RTL→GDS pipeline); this doc covers what to *write down*.
 
+## 0. Lab-notebook principle (the one rule above all others)
+
+**Treat every repo like a lab notebook: documentation travels with code, in the same
+change.** When you alter code, a codec, a spec number, a block name, or a design decision,
+you update the affected **README(s), `docs/`, and spec (`arch.yml` / `CLAIMS.md` /
+`HW_CONTRACT.md` / paper) in the *same* commit or PR** — never as a "docs later" follow-up.
+A README that lies about the current design is worse than none: teammates and the compiler
+team act on it. Docs are part of *done*.
+
+Concretely, before you call a substantive change complete: grep the repo **and its sibling
+repos** for the fact you changed (old tier, old number, old block name, retired feature) and
+update every hit — README, `docs/`, `CLAIMS.md`, `arch.yml`, `HW_CONTRACT.md`, the paper, and
+the org profile README. A discovery that spans repos (e.g. a codec change touching both the
+KVE and the standalone ChannelQuant repo) updates **both**. The nightly drift check (below)
+is a backstop for what slips through, not a substitute for doing this by hand as you go.
+
 ## 1. The two-repo model
 
 - **Per-block repos** (`attention-compute-unit`, `kv-cache-engine`,

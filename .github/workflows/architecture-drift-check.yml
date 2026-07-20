@@ -33,7 +33,7 @@ jobs:
       - name: Clone block repos (source of truth)
         run: |
           mkdir -p block_repos
-          for r in adaptive-precision-attention kv-cache-engine token-importance-unit; do
+          for r in attention-compute-unit kv-cache-engine token-importance-unit; do
             git clone --depth 1 "https://github.com/LonghornSilicon/$r.git" "block_repos/$r"
           done
 

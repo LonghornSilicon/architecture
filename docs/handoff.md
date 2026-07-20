@@ -38,7 +38,7 @@ The session covered three distinct phases of work. The full audit trail is in [`
 
 **(c) Phase 0 mid-stream arch updates.** Four mid-stream changes triggered by user direction:
    - **HIF: USB-C 2.0 → PCIe Gen3 x1** on **M.2 2280** form factor. +0.25 mm² area; weight-load time 25 s → 1.5 s; vendor IP has public 16nm datasheets.
-   - **ACU naming convention adopted** (umbrella for MatE + VecU + KVE); honors Chaithu Talasila's `adaptive-precision-attention` framework while preserving Lambda's block decomposition.
+   - **ACU naming convention adopted** (umbrella for MatE + VecU + KVE); honors Chaithu Talasila's `attention-compute-unit` framework while preserving Lambda's block decomposition.
    - **TIU block added** (NEW, 0.03 mm²) — modeled on arXiv 2604.04722 "Adaptive KV-Cache Quantization for Lightweight On-Device LLMs."
    - **Area accounting fix** — earlier drafts silently dropped the routing_overhead_buffer from `total_mm2`; gross area is now honestly 4.354 mm², shrink path lands at 4.014 mm².
 
@@ -147,7 +147,7 @@ architecture/
 │   ├── literature_audit.md         ← every attention / FFN / KV mechanism with
 │   │                                 go/no-go decision + citations
 │   ├── reconciliation_chaithu.md   ← shareable critique of teammate's
-│   │                                 adaptive-precision-attention work
+│   │                                 attention-compute-unit work
 │   ├── chamber-sync-setup.md       ← git-bundle sync to Cadence chamber
 │   └── tools-overview.md           ← chamber launcher framework convention
 │                                     + Directory dependencies and log/run
@@ -292,7 +292,7 @@ For a teammate seeing the project for the first time:
 |---|---|
 | Architecture lead, RTL lead | Alan Schwartz, UT Austin (`aschwartz0408@utexas.edu`) |
 | Faculty advisor | TBD (UT Austin computer architecture lab) |
-| Companion ISA work | Chaithu Talasila — `github.com/LonghornSilicon/adaptive-precision-attention`; reconciliation status in [`reconciliation_chaithu.md`](reconciliation_chaithu.md) |
+| Companion ISA work | Chaithu Talasila — `github.com/LonghornSilicon/attention-compute-unit`; reconciliation status in [`reconciliation_chaithu.md`](reconciliation_chaithu.md) |
 | Shuttle program | IMEC / Europractice — `eptsmc@imec.be` |
 | PHY vendor IP | Synopsys DesignWare (LPDDR + PCIe) OR Cadence Denali (LPDDR) + Cadence PCIe Gen3 PHY |
 | EDA flow | Cadence end-to-end: Stratus HLS, Genus, Innovus (Stylus), Xcelium + Verisium Debug, **Pegasus** (DRC/LVS), **Tempus/SSV** (STA), Quantus (extraction), Voltus (power). All-Cadence — matches the shared hosted chamber's tool set; Calibre/PrimeTime are NOT on the chamber. |

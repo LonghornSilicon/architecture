@@ -2,7 +2,7 @@
 
 **Spec source:** `../../../arch.yml` block `token_importance_unit` + `definitive_features_and_blocks.hardware_blocks` entry `TIU`.
 **Inspiration:** arXiv 2604.04722 "Adaptive KV-Cache Quantization for Lightweight On-Device LLMs".
-**Naming credit:** Chaithu Talasila's adaptive-precision-attention framework (LonghornSilicon/adaptive-precision-attention); see `../../../docs/reconciliation_chaithu.md`.
+**Naming credit:** Chaithu Talasila's attention-compute-unit framework (LonghornSilicon/attention-compute-unit); see `../../../docs/reconciliation_chaithu.md`.
 
 ## What this block is
 

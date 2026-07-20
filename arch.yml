@@ -124,14 +124,14 @@ definitive_features_and_blocks:
         P·V accumulation runs at INT8 (softmax probs × INT8 V) OR FP16
         (FP16 × FP16 → FP32 accumulate), selected PER TILE by the ACU precision
         controller. The FP16 path is a heterogeneous MAC mode in the same array,
-        matching the adaptive-precision-attention block's MAC array (mac_array_ref).
+        matching the attention-compute-unit block's MAC array (mac_array_ref).
         ACCUMULATOR WIDTH: the INT8 P·V path reduces over the TOKEN dimension, so
         its accumulator scales with context length, NOT hidden dim — it needs INT32,
         not the INT24 used for W4A8 GEMMs (see accumulator_rationale, re-derived
         2026-07-20 on Qwen2-1.5B). FP32 for the FP16 tiles.
       precision_control: |
         Per-tile INT8/FP16 gate from the ACU precision controller
-        (adaptive-precision-attention repo): max(|s|)·N > 10·sum(|s|) → FP16, else
+        (attention-compute-unit repo): max(|s|)·N > 10·sum(|s|) → FP16, else
         INT8 (precision_controller_ref.py, 143/143 bit-exact vs RTL). Weight / FFN
         GEMMs stay W4A8 (INT8×INT4); only the attention tiles the gate flags
         escalate to FP16. This COMMITS the FP16 MAC path and resolves the earlier
@@ -151,7 +151,7 @@ definitive_features_and_blocks:
 
         (B) INT8 P·V — reduce over the TOKEN dim → width scales with CONTEXT LENGTH.
         Re-derived 2026-07-20 on Qwen2-1.5B (analysis/pv_accumulator_width.py in the
-        adaptive-precision-attention repo). P is quantized per-query-row to INT8
+        attention-compute-unit repo). P is quantized per-query-row to INT8
         ([0,127]), V per-token to INT8 ([-127,127]); acc[q,d] = Σ_t P_int·V_int over
         the causal prefix. Worst case (maximally FLAT causal row of length L: every
         P_int ≈ 127) is 127·127·L = 16129·L → 14 + ceil(log2 L) bits signed:
@@ -178,7 +178,7 @@ definitive_features_and_blocks:
         - Weight-stationary primary dataflow (output-stationary CSR alt for Q·K^T)
         - 1.6× compute headroom over bandwidth-bound floor across all reasonable models
         - K dequantized per-channel by KVE (INT4·FP16) before Q·K^T scoring (no compressed-domain read path)
-        - Heterogeneous INT8 + FP16 MAC — attention P·V routes per-tile via the ACU precision controller (FP16 for peaked tiles, INT8 otherwise); weight/FFN GEMMs stay INT8×INT4. Committed 2026-07-18, resolving the "no-FP16-path" reconciliation (STATUS §7); the precision controller + MAC array RTL are in the adaptive-precision-attention repo (Sky130-signed-off).
+        - Heterogeneous INT8 + FP16 MAC — attention P·V routes per-tile via the ACU precision controller (FP16 for peaked tiles, INT8 otherwise); weight/FFN GEMMs stay INT8×INT4. Committed 2026-07-18, resolving the "no-FP16-path" reconciliation (STATUS §7); the precision controller + MAC array RTL are in the attention-compute-unit repo (Sky130-signed-off).
 
     - id: VecU
       name: Vector Unit — 8-lane SIMD with online softmax
@@ -338,8 +338,8 @@ definitive_features_and_blocks:
         derived for the pre-pivot codec; TBD — pending re-derivation for
         ChannelQuant / Qwen2-1.5B.)
       naming_credit: |
-        TIU naming convention adopted from Chaithu Talasila's adaptive-precision-
-        attention framework (LonghornSilicon/adaptive-precision-attention); the
+        TIU naming convention adopted from Chaithu Talasila's attention-compute-
+        unit framework (LonghornSilicon/attention-compute-unit); the
         block design here departs from his draft and is grounded in
         arXiv 2604.04722. See docs/reconciliation_chaithu.md.
 

@@ -17,7 +17,7 @@ ISSUE_TITLE = "🔄 Architecture drift check"
 
 # block repos cloned as siblings under block_repos/ by the workflow
 BLOCK_REPOS = {
-    "ACU / block 1 — adaptive-precision-attention": "block_repos/adaptive-precision-attention",
+    "ACU / block 1 — attention-compute-unit": "block_repos/attention-compute-unit",
     "KVCE / block 2 — kv-cache-engine": "block_repos/kv-cache-engine",
     "TIU / block 3 — token-importance-unit": "block_repos/token-importance-unit",
 }

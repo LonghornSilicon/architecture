@@ -3,12 +3,12 @@
 `std-0.1`, 2026-07-18. The conventions every block repo and the architecture hub follow
 so a compiler/verification team can build against the accelerator without reading RTL.
 If you are standing up a new block, this sits alongside
-[`adaptive-precision-attention/docs/new_block_blueprint.md`](https://github.com/LonghornSilicon/adaptive-precision-attention/blob/master/docs/new_block_blueprint.md)
+[`attention-compute-unit/docs/new_block_blueprint.md`](https://github.com/LonghornSilicon/attention-compute-unit/blob/master/docs/new_block_blueprint.md)
 (which covers the RTL→GDS pipeline); this doc covers what to *write down*.
 
 ## 1. The two-repo model
 
-- **Per-block repos** (`adaptive-precision-attention`, `kv-cache-engine`,
+- **Per-block repos** (`attention-compute-unit`, `kv-cache-engine`,
   `token-importance-unit`, …) own the RTL of record, the block's own ISA/interface spec,
   its reference model, and its paper section.
 - **`architecture`** (this repo, "Lambda") owns the chip-level spec (`arch.yml`), the

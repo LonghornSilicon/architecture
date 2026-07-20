@@ -44,7 +44,7 @@ overrides).
 
 Correspondence to the standalone block repos (which are the RTL of record for three of
 these): **KVE** ⇢ `kv-cache-engine`; **TIU** ⇢ `token-importance-unit`; the
-**precision-controller + MAC-array** work in `adaptive-precision-attention` is the ACU
+**precision-controller + MAC-array** work in `attention-compute-unit` is the ACU
 research line — see the precision reconciliation in §6.
 
 ---
@@ -134,7 +134,7 @@ MAC array:
 
 **This is committed** (decided 2026-07-18; resolves the former `STATUS.md` §7 "no FP16
 path" reconciliation — MatE gains the FP16 escape rather than dropping the precision
-gate). The controller + MAC-array RTL live in `adaptive-precision-attention` (both
+gate). The controller + MAC-array RTL live in `attention-compute-unit` (both
 Sky130-signed-off); `precision_controller_ref.py` is 143/143 bit-exact vs its RTL and is
 the calibration tool.
 
@@ -205,7 +205,7 @@ per-block calibration entry points.
 |---|---|---|
 | KVE ChannelQuant | `kv-cache-engine/sw/reference_model/channelquant_ref.{cpp,hpp,py}` | Python↔C++↔SV, 9/9 vectors |
 | TIU | `token-importance-unit/sw/reference_model/tiu_ref.py` | Python↔RTL on the real-Qwen2 golden trace |
-| ACU precision controller | `adaptive-precision-attention/sw/reference_model/precision_controller_ref.{py,cpp}` | 143/143 vs RTL |
+| ACU precision controller | `attention-compute-unit/sw/reference_model/precision_controller_ref.{py,cpp}` | 143/143 vs RTL |
 | ACU MAC array | `…/mac_array_ref.{py,cpp}` | self-test clean |
 | LSU assembler | `src/golden/lsu_asm.py` | *to draft* (see `src/isa/README.md`) |
 

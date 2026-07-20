@@ -1,4 +1,4 @@
-# Reconciling `adaptive-precision-attention` with Lambda's `arch.yml`
+# Reconciling `attention-compute-unit` with Lambda's `arch.yml`
 
 **Authors:** Lambda architecture team (Alan Schwartz, UT Austin)
 **Audience:** Chaithu Talasila + faculty advisor
@@ -7,7 +7,7 @@
 
 ---
 
-> **RESOLUTION (2026-07-18): reversed — MatE adopts the FP16 P·V path.** The conclusion below (that the run-time precision controller / FP16 MAC path was unnecessary work for Lambda) has been **reversed**. MatE is now a heterogeneous INT8 + FP16 systolic array: weight/FFN GEMMs stay W4A8 (INT8×INT4) and Q·K^T stays INT8×(per-channel-dequantized FP16 K), but the **attention P·V matmul routes per-tile INT8 or FP16**, selected by the ACU precision controller (`max(|s|)·N > 10·Σ(|s|)` → FP16, else INT8). The controller + FP16 MAC-array RTL are the Sky130-signed-off `adaptive-precision-attention` block, adopted verbatim. Note the scope: the per-tile gate applies to **P·V**, *not* to the KV codec or to Q·K^T scoring — ChannelQuant's static per-channel scales + FP16 outlier lane still make a run-time gate unnecessary for the codec and for scoring (those parts of the argument below remain correct). The **accumulator / INT24 discussion below is also unchanged and still correct.** Area/power delta of the FP16 mode is TBD, pending re-synthesis. The reasoning below is preserved for history; read it through this reversal.
+> **RESOLUTION (2026-07-18): reversed — MatE adopts the FP16 P·V path.** The conclusion below (that the run-time precision controller / FP16 MAC path was unnecessary work for Lambda) has been **reversed**. MatE is now a heterogeneous INT8 + FP16 systolic array: weight/FFN GEMMs stay W4A8 (INT8×INT4) and Q·K^T stays INT8×(per-channel-dequantized FP16 K), but the **attention P·V matmul routes per-tile INT8 or FP16**, selected by the ACU precision controller (`max(|s|)·N > 10·Σ(|s|)` → FP16, else INT8). The controller + FP16 MAC-array RTL are the Sky130-signed-off `attention-compute-unit` block, adopted verbatim. Note the scope: the per-tile gate applies to **P·V**, *not* to the KV codec or to Q·K^T scoring — ChannelQuant's static per-channel scales + FP16 outlier lane still make a run-time gate unnecessary for the codec and for scoring (those parts of the argument below remain correct). The **accumulator / INT24 discussion below is also unchanged and still correct.** Area/power delta of the FP16 mode is TBD, pending re-synthesis. The reasoning below is preserved for history; read it through this reversal.
 
 ---
 
@@ -15,7 +15,7 @@
 
 ## What this document is
 
-A peer-to-peer technical reconciliation of `LonghornSilicon/adaptive-precision-attention` (your work on the Precision Controller + MAC Array + the broader four-block framework: ACU, KV Cache Engine, Token Importance Unit, Memory Hierarchy Controller) against Lambda's current `arch.yml` spec — the canonical chip target for our 4 mm² TSMC 16nm FinFET (N16FFC) tape-out via IMEC mini@sic 2.0. (Lambda's finer taxonomy maps its MSC to the canonical Memory Hierarchy Controller / MHC, and its KVE = your KV Cache Engine block.)
+A peer-to-peer technical reconciliation of `LonghornSilicon/attention-compute-unit` (your work on the Precision Controller + MAC Array + the broader four-block framework: ACU, KV Cache Engine, Token Importance Unit, Memory Hierarchy Controller) against Lambda's current `arch.yml` spec — the canonical chip target for our 4 mm² TSMC 16nm FinFET (N16FFC) tape-out via IMEC mini@sic 2.0. (Lambda's finer taxonomy maps its MSC to the canonical Memory Hierarchy Controller / MHC, and its KVE = your KV Cache Engine block.)
 
 There's a real architectural choice that needs to be made deliberately, and the path Lambda has committed to differs from yours in one important way. This doc lays out what we agree on, where Lambda has chosen differently, and what we'd like to absorb from your work.
 
@@ -96,9 +96,9 @@ The published ChannelQuant recipe (KIVI, ICML 2024; KVQuant, 2024) and Lambda's 
 
 Two reasonable paths forward; both are good.
 
-**Path 1 — Align your work with Lambda's `arch.yml`.** Reshape `adaptive-precision-attention` against Lambda's seven-block decomposition. Your ACU work becomes Lambda's MatE + VecU + KVE (Lambda's `src/blocks/{mate,vecu,kce}/`; the `kce/` dir name is kept for HLS continuity). Your TIU spec becomes the basis for `src/blocks/tiu/`. Your KVCE/MHC work merges with Lambda's MSC. The Precision Controller doesn't have a Lambda analog (deliberately) — but your ISA + reference-model + verification methodology applies everywhere else. The team gets one canonical chip target.
+**Path 1 — Align your work with Lambda's `arch.yml`.** Reshape `attention-compute-unit` against Lambda's seven-block decomposition. Your ACU work becomes Lambda's MatE + VecU + KVE (Lambda's `src/blocks/{mate,vecu,kce}/`; the `kce/` dir name is kept for HLS continuity). Your TIU spec becomes the basis for `src/blocks/tiu/`. Your KVCE/MHC work merges with Lambda's MSC. The Precision Controller doesn't have a Lambda analog (deliberately) — but your ISA + reference-model + verification methodology applies everywhere else. The team gets one canonical chip target.
 
-**Path 2 — Fork your repo as an alternative architecture.** `adaptive-precision-attention` continues as a separate architectural candidate for a different chip target (e.g., a node where FP16 area is cheaper; a workload where outliers don't compress under per-channel quantization; a teaching artifact). Lambda's repo and yours diverge cleanly. The team has two reference architectures, each pushing its own hypothesis. This is a publishable contrast.
+**Path 2 — Fork your repo as an alternative architecture.** `attention-compute-unit` continues as a separate architectural candidate for a different chip target (e.g., a node where FP16 area is cheaper; a workload where outliers don't compress under per-channel quantization; a teaching artifact). Lambda's repo and yours diverge cleanly. The team has two reference architectures, each pushing its own hypothesis. This is a publishable contrast.
 
 Both are legitimate paths. The choice depends on your preference: do you want the Precision Controller to live as an on-silicon primitive, or as a methodological contribution that lifts up the rest of Lambda's design? Either is a real research first.
 

@@ -9,7 +9,7 @@
 - Output-stationary alt dataflow for Q·K^T (Q pinned, K streams from kv_scratchpad)
 - Q·K^T scoring on **per-channel-dequantized K**: under the ChannelQuant codec of record the KVE reconstructs K as `INT4_code · FP16_scale` (+ FP16 replay for the k=2 outlier channels) **before** the score matmul — there is no compressed-domain / raw-index read path. Q·K^T stays INT8×(dequantized FP16 K).
 - **Per-tile INT8/FP16 P·V matmul.** The attention P·V product routes each tile to the INT8 path or the FP16 MAC path, selected by the **ACU precision controller** (`max(|s|)·N > 10·Σ(|s|)` → FP16, else INT8; peaked-attention tiles escalate to FP16). The controller + FP16 MAC-array RTL are the Sky130-signed-off `adaptive-precision-attention` block.
-- **INT16 partial-product register inside each PE; INT24 K-axis accumulator at column output** (correction from earlier "INT16 accumulator" spec bug — see `STATUS.md` §4 #3). *(Accumulator margin was derived from the retired 3B dims; TBD, pending re-derivation for ChannelQuant / Qwen2-1.5B.)*
+- **INT16 partial-product register inside each PE.** Two accumulator widths at the column output, because the two integer reduction axes differ in length: **INT24 for hidden-dim reductions** (W4A8 GEMM, Q·Kᵀ — product 10-bit × ≤4096 terms = 22b) and **INT32 for the INT8 P·V path** (reduces over the *token* dim, so width scales with context: a flat causal row of length L needs 14+ceil(log2 L) bits — INT24 only guarantees no overflow to ~520 tokens, INT32 to ~133k). FP32 for FP16 tiles. Re-derived 2026-07-20 on Qwen2-1.5B (`adaptive-precision-attention/analysis/pv_accumulator_width.py`): empirically the P·V accumulator stays at ~2^21 (21b) and does **not** grow with context — real softmax is peaky — so INT24 works in practice, but INT32 is specced for guaranteed correctness on any distribution. (Earlier "INT16 accumulator" was a spec bug — `STATUS.md` §4 #3.)
 - 0.10 mm² target at 16nm; 0.32 W at 50% util
 
 ## Quick start
@@ -42,5 +42,5 @@ Build output lands under `$LAMBDA_WORK/mate/stratus/<run-id>/<config>/` (= `~/wo
 ## Open design questions for the team
 
 1. Output-stationary mode CSR — is the per-tile mode switch fast enough to interleave with VecU softmax tiles in FlashAttention-3?
-2. Should the K-axis accumulator be INT32 instead of INT24 for headroom? Marginal area cost; matches TPU convention.
+2. ~~Should the K-axis accumulator be INT32 instead of INT24 for headroom?~~ **Resolved 2026-07-20** (`pv_accumulator_width.py`): split it — INT24 for hidden-dim reductions, **INT32 for the INT8 P·V token-reduction path** (not headroom, a hard requirement — INT24 overflows on a flat attention tile past ~520 tokens). See the `arch.yml` accumulator_rationale.
 3. INT8×INT8 fallback mode — implement as separate PE multiplier or as INT4 × 2 emulation? Affects gate count.

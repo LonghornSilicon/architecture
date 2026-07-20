@@ -125,6 +125,10 @@ definitive_features_and_blocks:
         (FP16 × FP16 → FP32 accumulate), selected PER TILE by the ACU precision
         controller. The FP16 path is a heterogeneous MAC mode in the same array,
         matching the adaptive-precision-attention block's MAC array (mac_array_ref).
+        ACCUMULATOR WIDTH: the INT8 P·V path reduces over the TOKEN dimension, so
+        its accumulator scales with context length, NOT hidden dim — it needs INT32,
+        not the INT24 used for W4A8 GEMMs (see accumulator_rationale, re-derived
+        2026-07-20 on Qwen2-1.5B). FP32 for the FP16 tiles.
       precision_control: |
         Per-tile INT8/FP16 gate from the ACU precision controller
         (adaptive-precision-attention repo): max(|s|)·N > 10·sum(|s|) → FP16, else
@@ -134,22 +138,43 @@ definitive_features_and_blocks:
         "no FP16 path in MatE" reconciliation item (STATUS §7); decided 2026-07-18.
         Area/power delta of the FP16 mode is TBD (pending re-synthesis).
       accumulator_rationale: |
+        The array carries TWO integer accumulator widths, because the two integer
+        reduction axes have very different lengths:
+
+        (A) W4A8 GEMM + Q·Kᵀ scoring — reduce over the HIDDEN/HEAD dim.
         INT8 × INT4 = 7-bit signed × 3-bit signed = 10-bit signed product
-        (max |−128 × −8| = 1024 in the corner case). Reduction along K-axis
-        for FFN hidden dim up to ~4096 needs log2(4096) + 10 = 22 bits signed,
-        so INT24 is the right K-axis accumulator width. INT16 is NOT enough —
-        it saturates after ~64 products in the worst case. (An earlier draft
-        of this spec specified "INT16 accumulator"; that was wrong and is
-        corrected here.) Inside each PE, an INT16 register holds the
-        cycle-by-cycle partial product before it walks down the column.
-        NOTE: the accumulator width was derived from the retired 3B dims;
-        its margin is TBD (pending re-derivation for ChannelQuant / Qwen2-1.5B).
+        (max |−128 × −8| = 1024). Reduction over FFN hidden dim up to ~4096 needs
+        log2(4096) + 10 = 22 bits signed, so INT24 is correct here. INT16 is NOT
+        enough — it saturates after ~64 products. (An earlier draft said "INT16";
+        that was wrong.) Inside each PE an INT16 register holds the cycle-by-cycle
+        partial product before it walks down the column.
+
+        (B) INT8 P·V — reduce over the TOKEN dim → width scales with CONTEXT LENGTH.
+        Re-derived 2026-07-20 on Qwen2-1.5B (analysis/pv_accumulator_width.py in the
+        adaptive-precision-attention repo). P is quantized per-query-row to INT8
+        ([0,127]), V per-token to INT8 ([-127,127]); acc[q,d] = Σ_t P_int·V_int over
+        the causal prefix. Worst case (maximally FLAT causal row of length L: every
+        P_int ≈ 127) is 127·127·L = 16129·L → 14 + ceil(log2 L) bits signed:
+          L=520 → 23b (INT24 limit) ; L=4096 → 27b ; L=133k → 31b.
+        So INT24 guarantees no P·V overflow only to ~520 tokens; INT32 guarantees it
+        to ~133k tokens. EMPIRICALLY on real Qwen2-1.5B the accumulator stays at ~2^21
+        (21b signed) and does NOT grow with context (599k@1k, 610k@2k, 711k@4k) —
+        real softmax is peaky (the same attention concentration H2O exploits), so
+        INT24 works in PRACTICE. But a corner-case flat tile silently corrupts an
+        attention output, so the P·V accumulator is specced INT32 for guaranteed
+        correctness across arbitrary distributions at real context lengths.
+
+        DECISION: INT24 for reduction-over-hidden-dim (W4A8 GEMM, Q·Kᵀ); INT32 for
+        the INT8 P·V reduction-over-tokens path; FP32 for the FP16 tiles. Resolves the
+        MatE README open question "INT32 vs INT24 for headroom" — it is not headroom,
+        it is a hard requirement on the token-reduction axis.
       peak_tops: 0.128                                         # 64 × 2 ops × 1 GHz
       sustained_gops_at_60pct_util: 76.8
       area_mm2: 0.10
       power_w_at_50pct_util: 0.32
       key_decisions:
-        - INT24 K-axis accumulator (matches flagship; INT16 was a spec error)
+        - INT24 accumulator for hidden-dim reductions (W4A8 GEMM, Q·Kᵀ); INT32 for the
+          INT8 P·V token-reduction path (context-scaled); FP32 for FP16 tiles. INT16 was a spec error.
         - Weight-stationary primary dataflow (output-stationary CSR alt for Q·K^T)
         - 1.6× compute headroom over bandwidth-bound floor across all reasonable models
         - K dequantized per-channel by KVE (INT4·FP16) before Q·K^T scoring (no compressed-domain read path)

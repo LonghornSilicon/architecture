@@ -50,8 +50,13 @@ The flagship is currently **less complete than GF180** for the datapath, because
 
 1. **KVE `gf180mcu_fd_ip_sram` macro** — KV storage hardens as flop register arrays at the depth-2
    proxy (not real capacity). → **in progress** (SRAM-macro agent).
-2. **`vecu_softmax` area** — the ss-close resize ~2×'d cells (→1.49 mm²); may not fit the padring
-   slot. → **in progress** (pipeline-rebalance agent).
+2. **`vecu_softmax` area** — the ss-close resize ~2×'d cells (→1.49 mm²). **RTL rebalanced 2026-07-21**
+   (`attention-compute-unit` `rtl` `2c458aa`, architecture `rtl` `d837b42`): converted to a
+   multi-cycle datapath (one fp32 op/cycle, longest path ~one fp32 op vs two → closes ss at a
+   faster clock with *normal* resizing, no cell-cloning blow-up; +FFs but combinational area
+   returns toward the ~55k base). Bit-exact, cosim re-confirmed `ALL BLOCKS PASS`. → **GF180
+   re-harden pending** (queued behind the KVE SRAM agent, which owns the chipathon repo) to confirm
+   the actual area drop + that ss still closes.
 3. **ss-corner max-transition (slew)** on the large fp16 / register-array blocks (`mate_pv_fp16`,
    `vecu_softmax`, `kve`). Setup/hold/DRC/LVS unaffected. → physical-opt (driver upsizing / slew
    repair).

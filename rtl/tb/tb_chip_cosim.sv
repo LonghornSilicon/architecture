@@ -21,6 +21,17 @@ module tb_chip_cosim;
     reg  [D*DW-1:0] kve_rot; wire [D*32-1:0] kve_vhat;
     wht_inverse_out #(.D(D), .DW(DW)) u_mate (.rot_out(kve_rot), .vhat_out(kve_vhat));
 
+    // ===== MatE: INT8 P·V MAC (mate_pv) — the token-reduction accumulation =====
+    reg              pv_sv, pv_sl;
+    reg  signed [7:0] pv_a;
+    reg  [D*8-1:0]   pv_v;
+    wire             pv_cv;
+    wire signed [D*32-1:0] pv_c;
+    mate_pv #(.N(D)) u_pv (
+        .clk(clk), .rst_n(rst_n),
+        .s_valid(pv_sv), .a_data(pv_a), .v_data(pv_v), .s_last(pv_sl),
+        .c_valid(pv_cv), .c_data(pv_c));
+
     // ================= ACU: precision gate =================
     reg acu_sv, acu_sl; reg signed [7:0] acu_s; wire acu_dv, acu_fp16;
     precision_controller #(.SCORE_WIDTH(8)) u_acu (
@@ -43,6 +54,16 @@ module tb_chip_cosim;
     reg [7:0] mass [0:NS-1];
     integer exp_evict, mn; reg exp_fp16; integer mx, sm, e0;
 
+    // ---- P·V (MatE) working state ----
+    localparam integer PVM = 8;          // tokens accumulated by the P·V tile
+    localparam real    PV_TOL = 0.06;    // e2e reconstruction rel-err gate (INT8 tile)
+    reg  [DW-1:0] rotv16 [0:PVM*D-1];    // rotated V̂ per (token,channel), fp16, from KVE
+    reg  signed [7:0] Vint [0:PVM*D-1];  // int8-quantized rotated V̂ (shared tile scale)
+    integer Aint [0:PVM-1];              // int8 attention weights
+    integer tbc  [0:D-1];                // TB int32 reference of the P·V accumulation
+    real scaleA, scaleV, vmax, rr, orot_r, ortl, oref, gmax, adiff, maxrel;
+    integer iv, pd;
+
     task step; begin @(negedge clk); end endtask
 
     initial begin
@@ -63,11 +84,82 @@ module tb_chip_cosim;
         for (t=0;t<Tn;t=t+1) begin
             for (d=0;d<Dn;d=d+1) kve_in[d*DW +: DW] = Vin[t][d];
             #1;
-            for (d=0;d<Dn;d=d+1) begin kve_didx = d[$clog2(D)-1:0]; #1; kve_rot[d*DW +: DW] = kve_drot; end
+            for (d=0;d<Dn;d=d+1) begin
+                kve_didx = d[$clog2(D)-1:0]; #1;
+                kve_rot[d*DW +: DW] = kve_drot;
+                if (t < PVM) rotv16[t*D + d] = kve_drot;   // stash rotated V̂ for the P·V tile
+            end
             #1;
             for (d=0;d<Dn;d=d+1) if (kve_vhat[d*32 +: 32] !== Ghat[t][d]) errors = errors + 1;
         end
         $display("[KVE ] CQ-3-rot V̂ over %0d real-Qwen tokens: %s", Tn, (errors==e0)?"bit-exact vs reference":"MISMATCH");
+
+        // ===== BLOCK 2b (MatE P·V MAC): true end-to-end KVE -> P·V -> inverse =====
+        // Insert the INT8 P·V accumulation Σ_t A[t]·V̂rot[t] between the KVE's rotated V̂
+        // and wht_inverse_out, so the cosim runs the whole attention-output datapath —
+        // not a straight V̂ copy. Bit-exact int32 gate + an e2e reconstruction check:
+        // because the inverse WHT is linear, inverse(Σ A·V̂rot) = Σ A·V̂ = Σ A·Ghat, so the
+        // reference is TB-computable from Ghat (the reference values) — no model needed.
+        e0 = errors;
+        for (t=0;t<PVM;t=t+1) Aint[t] = 127 - 10*t;          // distinct positive int8 weights
+        scaleA = 1.0/127.0;
+        vmax = 0.0;                                          // shared tile scale for V̂rot -> int8
+        for (t=0;t<PVM;t=t+1) for (d=0;d<D;d=d+1) begin
+            rr = cq_fp_pkg::f16_to_real(rotv16[t*D+d]); if (rr<0.0) rr=-rr;
+            if (rr>vmax) vmax=rr;
+        end
+        scaleV = (vmax>0.0) ? (vmax/127.0) : 1.0;
+        for (t=0;t<PVM;t=t+1) for (d=0;d<D;d=d+1) begin
+            rr = cq_fp_pkg::f16_to_real(rotv16[t*D+d]) / scaleV;
+            iv = $rtoi(rr + (rr>=0.0 ? 0.5 : -0.5));
+            if (iv>127) iv=127; if (iv<-127) iv=-127;
+            Vint[t*D+d] = iv[7:0];
+        end
+        for (d=0;d<D;d=d+1) begin                            // TB int32 reference (matmul_int8)
+            tbc[d] = 0;
+            for (t=0;t<PVM;t=t+1) tbc[d] = tbc[d] + Aint[t]*$signed(Vint[t*D+d]);
+        end
+        for (t=0;t<PVM;t=t+1) begin                          // drive the mate_pv RTL
+            step;
+            pv_sv = 1; pv_a = Aint[t][7:0]; pv_sl = (t==PVM-1);
+            for (d=0;d<D;d=d+1) pv_v[d*8 +: 8] = Vint[t*D+d];
+        end
+        step; pv_sv = 0; pv_sl = 0;
+        pd = 0; while (pv_cv !== 1'b1 && pd < 8) begin step; pd = pd + 1; end
+        if (pv_cv !== 1'b1) begin errors=errors+1; $display("  P·V c_valid never pulsed"); end
+        else for (d=0;d<D;d=d+1)
+            if ($signed(pv_c[d*32 +: 32]) !== tbc[d]) begin
+                errors=errors+1;
+                if (d<3) $display("  P·V lane %0d: got %0d exp %0d", d, $signed(pv_c[d*32 +: 32]), tbc[d]);
+            end
+        $display("[MatE] INT8 P·V MAC (mate_pv), %0d tokens x D=%0d, INT32 acc: %s",
+                 PVM, D, (errors==e0)?"int32 bit-exact vs matmul_int8":"MISMATCH");
+
+        // e2e: dequant the int32 result -> wht_inverse_out -> attention output; compare
+        // to Σ_t A[t]·Ghat[t] (the reference values). Gap = INT8 P·V quantization only.
+        e0 = errors;
+        for (d=0;d<D;d=d+1) begin
+            orot_r = $itor($signed(pv_c[d*32 +: 32])) * scaleA * scaleV;
+            kve_rot[d*DW +: DW] = cq_fp_pkg::real_to_f16(orot_r);
+        end
+        #1;
+        gmax = 1.0e-9;
+        for (d=0;d<D;d=d+1) begin
+            oref = 0.0;
+            for (t=0;t<PVM;t=t+1) oref = oref + ($itor(Aint[t])*scaleA)*cq_fp_pkg::f32_to_real(Ghat[t][d]);
+            if (oref<0.0 ? -oref>gmax : oref>gmax) gmax = (oref<0.0?-oref:oref);
+        end
+        maxrel = 0.0;
+        for (d=0;d<D;d=d+1) begin
+            ortl = cq_fp_pkg::f32_to_real(kve_vhat[d*32 +: 32]);
+            oref = 0.0;
+            for (t=0;t<PVM;t=t+1) oref = oref + ($itor(Aint[t])*scaleA)*cq_fp_pkg::f32_to_real(Ghat[t][d]);
+            adiff = ortl - oref; if (adiff<0.0) adiff=-adiff;
+            if (adiff/gmax > maxrel) maxrel = adiff/gmax;
+        end
+        if (maxrel >= PV_TOL) errors = errors + 1;
+        $display("[MatE] e2e KVE->P·V->inverse vs Sigma A*Ghat: max rel err %f (%s, tol %.2f)",
+                 maxrel, (maxrel<PV_TOL)?"within tol":"OUT OF TOL", PV_TOL);
 
         // ========== BLOCK 3 (TIU): install slots, accumulate mass, keep-tier + evict ==========
         // masses derived from the tile (per-token amax magnitude, quantized to a weight)
@@ -105,7 +197,7 @@ module tb_chip_cosim;
                  (errors==e0)?"match reference":"MISMATCH", acu_fp16);
 
         $display("");
-        $display("CROSS-BLOCK COSIM (ACU + KVE + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
+        $display("CROSS-BLOCK COSIM (ACU + KVE + MatE P·V + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
         $finish;
     end
 endmodule

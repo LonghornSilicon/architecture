@@ -399,7 +399,8 @@ module tb_chip_cosim;
         end
         step; sm_sv=0; sm_sl=0;
         k=0; pd=0;
-        while (k<LQK && pd<(LQK+40)) begin
+        // micro-sequenced vecu_softmax: COMPUTE ~8 cyc/score + EMIT ~8 cyc/weight
+        while (k<LQK && pd<(LQK*20+64)) begin
             step;
             if (sm_wv) begin Wsm[k]=sm_w; k=k+1; end
             pd=pd+1;

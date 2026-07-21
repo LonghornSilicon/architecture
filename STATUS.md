@@ -85,7 +85,8 @@ synthesizable RTL. Actual RTL status:
 | **TIU** | RTL-complete, Sky130 sign-off (`token-importance-unit` repo) |
 | **ACU precision controller** | RTL, Sky130 sign-off (`attention-compute-unit` repo) |
 | **MatE — P·V tile** | RTL, Sky130 sign-off — `mate_pv` (INT8) + `mate_pv_fp16` (FP16 escape). *Only the P·V vector-MAC.* |
-| **MatE — 8×8 systolic array (Q·Kᵀ + GEMM/FFN)** | **no RTL** — arithmetic modeled in `mac_array_ref`. Q·Kᵀ is **Phase 1** of the chipathon plan; the general GEMM/FFN engine is off-chip for the shuttle. |
+| **MatE — Q·Kᵀ decode scoring** | **RTL** — `mate_qkt` (INT8 Q × per-channel FP16 K → L scores), bit-exact to `mac_array_ref` sequential-fp32 golden, live in the cosim BLOCK 1 (Phase 1 done 2026-07-21, `attention-compute-unit` `rtl` `93e9960`). GF180 hardening pending (Phase 4). |
+| **MatE — 8×8 systolic array (general GEMM/FFN)** | **no RTL** — off-chip for the shuttle; the general weight-stationary GEMM/FFN engine is a separate later program. |
 | **VecU** | **no RTL, no golden yet** — softmax/RoPE/RMSNorm slice is **Phase 2** of the chipathon plan. |
 | **MSC / LSU / HIF** | spec-level; not in the decode-attention-datapath tapeout boundary. |
 

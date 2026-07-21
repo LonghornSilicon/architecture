@@ -55,7 +55,7 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 | BLOCK 2b/2c (MatE P·V, INT8 + FP16 escape) | **real RTL** |
 | BLOCK 3 (TIU) keep-tier + evict | **real RTL** |
 | BLOCK 1 (ACU) precision gate | **real RTL** |
-| **Q·Kᵀ score row** | reference stand-in ← **Phase 1** |
+| **Q·Kᵀ score row** | **real RTL** (`mate_qkt`) — Phase 1 done 2026-07-21 |
 | **softmax / RoPE / RMSNorm** | reference stand-in ← **Phase 2** |
 
 ## Phases
@@ -63,7 +63,7 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 | Phase | Build | Cosim effect | Gate |
 |---|---|---|---|
 | **0** (now) | Plan doc; RTL-maturity honesty in STATUS; finish FP16 wiring (done) | stand-ins labeled | — |
-| **1 — MatE Q·Kᵀ** | Decode Q·Kᵀ reduction engine (INT8 Q × per-channel FP16 K → L scores); golden from `mac_array_ref`; bit-exact/toleranced TB; swap into cosim BLOCK 1 | scores → **real RTL** | full cosim `ALL BLOCKS PASS` |
+| **1 — MatE Q·Kᵀ** ✅ done | Decode Q·Kᵀ reduction engine (INT8 Q × per-channel FP16 K → L scores); golden from `mac_array_ref`; bit-exact/toleranced TB; swap into cosim BLOCK 1 | scores → **real RTL** ✅ | full cosim `ALL BLOCKS PASS` ✅ (scores rel-err 4e-6) |
 | **2 — VecU softmax slice** | Write `vecu.py` golden first (does not exist); then single-row online-softmax + exp LUT + RoPE + RMSNorm; toleranced TB; swap into cosim | probabilities → **real RTL** | full cosim green |
 | **3 — Integrate** | ACU top wrapper + mini decode-step control FSM; full-datapath cosim on real Qwen tiles | **stand-ins = 0** | end-to-end green |
 | **4 — GF180 hardening** *(in `chipathon-lambda-acu`)* | Harden each block as a GF180 LibreLane macro (start with the already-signed logic blocks to de-risk the port early: precision-controller, mate_pv); then the integrated ACU (KVE SRAM macros, floorplan, hierarchy); 6 sign-off checks | — | clean GF180 sign-off per macro |

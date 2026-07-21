@@ -2,7 +2,7 @@
 
 > **Codec-of-record note:** Lambda's KV-cache compression codec of record is **ChannelQuant** — per-channel INT4 keys (grouped, G=128, D per-channel FP16 scales) + per-token INT4 values + a static top-k (k=2) FP16 outlier-channel lane selected by a calibrated ROM mask, packaged as the **KV Cache Engine (KVE)**. Keys are dequantized per-channel (INT4·FP16) before the score matmul; there is no compressed-domain read path. The full block RTL is complete through Sky130 sign-off in the `kv-cache-engine` repo; recipe follows KIVI (ICML 2024) / KVQuant (2024). The KVE's physical PD numbers at 16nm (area/power/Fmax) are **TBD — pending re-measurement for ChannelQuant**, as are per-model throughput/capacity numbers derived for the retired 3-5B target (pending re-derivation for Qwen2-1.5B). TurboQuant remains a cited prior work only; its pure history is on the `legacy/turboquant` branch.
 
-UT Austin AI accelerator project. **Target chip: Lambda — a 4 mm² ASIC on TSMC 16nm FinFET (N16FFC)**, targeting tape-out via IMEC / Europractice mini@sic 2.0. Standalone end-to-end transformer-decode accelerator running up to 1.5B-parameter W4A8 LLMs (validated on Qwen2-1.5B) at 6–8 tok/s in a ~2.6 W envelope. Plugs into any modern laptop or dev board via a **PCIe Gen3 x1 link on M.2 2280 form factor**.
+UT Austin AI accelerator project. **Target chip: Lambda — a 4 mm² ASIC on TSMC 16nm FinFET (N16FFC)**, targeting tape-out via IMEC / Europractice mini@sic 2.0. Standalone end-to-end transformer-decode accelerator running up to 1.5B-parameter W4A8 LLMs (validated on Qwen2-1.5B) at 6–8 tok/s in a ~2.6 W envelope. *(16nm ESTIMATEs: 6–8 tok/s from the bandwidth-bound model in arch.yml — weight_GB ÷ 11.94 GB/s sustained; ~2.6 W from arch.yml `power_budget` analytical breakdown, `estimate: true`, pending post-silicon characterization.)* Plugs into any modern laptop or dev board via a **PCIe Gen3 x1 link on M.2 2280 form factor**.
 
 *Lambda* is the codename: **L**onghorn **A**ccelerator for **M**atrix-**B**ased **D**ataflow & **A**ttention.
 
@@ -56,7 +56,7 @@ The repo was restructured to single-arch focus on 2026-05-14. Earlier history (1
 
 ## Project context
 
-- **Process:** TSMC 16nm FinFET (N16FFC), via imec / TSMC University Program — 28.2 MTr/mm² logic, 1.25 MB/mm² HD SRAM, 0.8 V core, 1 GHz target (800 MHz fallback)
+- **Process:** TSMC 16nm FinFET (N16FFC), via imec / TSMC University Program — 28.2 MTr/mm² logic, 1.25 MB/mm² HD SRAM, 0.8 V core, 1 GHz target (800 MHz fallback) *(density/voltage figures are TSMC N16FFC PDK/datasheet values; 1 GHz/800 MHz are design targets, not measured Fmax — no 16nm silicon exists yet.)*
 - **Shuttle:** IMEC / Europractice mini@sic 2.0 (primary, ~$60-100K) or Muse Semiconductor (US fallback, ~$75K) — both route to the TSMC University FinFET program
 - **Die:** 4 mm² (2 × 2 mm) — the IMEC / Muse mini@sic minimum Full Block at TSMC 16nm
 - **EDA:** Cadence flow throughout — Stratus HLS for C++ → RTL, Genus for synthesis, Innovus (Stylus Common UI) for PnR, **Pegasus for DRC/LVS, Tempus/SSV for STA signoff** (Quantus for extraction, Voltus for power) — all Cadence, matching the shared hosted chamber's tool set; **Verisium Debug** with SimVision as fallback for waveform debug. Tool access bundled with the chamber engagement (see `docs/tools-overview.md` "Chamber execution model").

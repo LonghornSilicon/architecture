@@ -6,12 +6,12 @@
 
 ## What this block is
 
-- **Per-block attention-entropy accumulator.** 16-bit importance register per 16-token block; 128 blocks tracked (matches MSC block table); 256 B total SRAM.
+- **Per-block attention-entropy accumulator.** 16-bit importance register per 16-token block; 128 blocks tracked (matches MSC block table); 256 B total SRAM (= 128 blocks × 16-bit register).
 - **Updated by VecU during softmax.** Each attention pass: VecU broadcasts cumulative softmax weight per block to TIU; TIU accumulator adds.
 - **Consumed by two downstream paths:**
   - MSC eviction policy: when scratchpad fills, evict block with lowest cumulative importance (H2O-style heavy-hitter retention)
   - KVE per-block precision: high-importance blocks stay at the higher ChannelQuant tier (CQ-4+ or CQ-8); low-importance blocks demote to CQ-4 at the cost of quality
-- 0.03 mm²; 0.01 W; ~15 verification tests.
+- 0.03 mm²; 0.01 W; ~15 verification tests. *(Area/power are 16nm ESTIMATES — arch.yml `token_importance_unit`: 256 B SRAM + comparator + accumulator + threshold reg; analytical, not silicon.)*
 
 ## Four CSR-selectable modes
 

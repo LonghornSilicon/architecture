@@ -10,7 +10,7 @@
 - **4 KB microcode RAM** — holds the entire pre-compiled model schedule for one transformer
 - Single-issue: 1 scalar + 1 vector + 1 DMA per cycle
 - No branch predictor, no OoO, no cache hierarchy — transformer decode is structurally identical layer-to-layer, so a static schedule walked deterministically suffices
-- 0.10 mm²; 0.05 W
+- 0.10 mm²; 0.05 W — **16nm ESTIMATE** (arch.yml `layer_sequencer`: 32-inst ISA + 4 KB microcode + 16×32b GPR). Analytical planning figure, not silicon.
 
 ## ISA stub (to be expanded in `../../isa/lsu.h`)
 

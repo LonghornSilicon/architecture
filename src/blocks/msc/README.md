@@ -10,7 +10,7 @@
 - DMA descriptor FSM
 - On-demand KV decompress trigger (cold-page hits route through the KVE decode path)
 - Request arbitration priority queue
-- 0.18 mm²; 0.15 W
+- 0.18 mm²; 0.15 W — **16nm ESTIMATE** (arch.yml `memory_subsystem_controller`: 1 LPDDR ch + 4-port crossbar + 128-entry block table). Analytical planning figure, not silicon. *(The 1.2 mm² LPDDR5X PHY below is a separate vendor-IP estimate, NDA-gated, ±0.3 mm².)*
 
 ## Explicitly NOT supported
 

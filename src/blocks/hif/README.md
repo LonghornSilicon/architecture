@@ -9,11 +9,11 @@
 - **M.2 2280 form factor** at the PCB level. M.2 connector wires 4 PCIe lanes by spec; on-die PHY drives x1 only (PCIe link training negotiates down cleanly)
 - Three jobs: (a) PCIe endpoint enumeration on host, (b) CSR access for chip configuration + microcode load + token I/O, (c) JTAG + scan-chain debug via dedicated pins (separate from PCIe lanes)
 - 16-deep doorbell queue (host → chip command notifications)
-- 0.55 mm²; 0.30 W
+- 0.55 mm²; 0.30 W — **16nm ESTIMATE** (area = 0.35 mm² PCIe Gen3 x1 PHY vendor IP + 0.20 mm² controller, see Area breakdown below; power from arch.yml `power_budget`). Vendor-IP + planning figure, not silicon.
 
 ## Why PCIe Gen3 x1 (not USB-C 2.0, not PCIe x4)
 
-- USB-C 2.0 weight-load latency (25 sec for 1.5 GB) is annoying for development iteration. PCIe Gen3 x1 lands at 1.5 sec.
+- USB-C 2.0 weight-load latency (25 sec for 1.5 GB) is annoying for development iteration. PCIe Gen3 x1 lands at 1.5 sec. *(Derived: 1.5 GB ÷ effective link bandwidth — ~60 MB/s USB-C 2.0 → ~25 s; ~1 GB/s PCIe Gen3 x1 → ~1.5 s.)*
 - PCIe Gen3 x4 PHY (~1.0-1.3 mm² at 16nm) doesn't fit at 4 mm² alongside LPDDR5X x16 PHY (1.2 mm²) + SRAM (0.71 mm²) + compute.
 - x1 gives ~3× more bandwidth than weight-load actually needs at 0.55 mm² total. Standard M.2 form factor enables plug-and-play on any modern laptop, dev board, or M.2 slot.
 - PCIe vendor IP at 16nm has **public datasheets** (Synopsys DesignWare PCIe Gen3 x1, Cadence PCIe Gen3 PHY) — unlike LPDDR5X PHY which is NDA-thin at 16nm.

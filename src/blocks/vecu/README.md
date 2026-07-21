@@ -8,7 +8,7 @@
 - Microcoded: 1K-instruction microcode RAM; ~32 µops typical per op
 - Three transcendental LUTs: exp (64-entry), rsqrt (64-entry), sigmoid (64-entry) + linear interp logic
 - Operations: vector add/sub/mul, compare/max/min, exp_lut, rsqrt_lut, sigmoid_lut, RoPE pair-rotation
-- 0.144 mm²; 0.16 W
+- 0.144 mm²; 0.16 W — **16nm ESTIMATE** (arch.yml `vector_unit`: 8 lanes × 16-bit, quarter-scale of the 32-lane flagship; power = 0.04 W/lane × 8 × 0.5 util). Analytical planning figure, not silicon.
 
 ## Why programmable instead of fixed-function
 

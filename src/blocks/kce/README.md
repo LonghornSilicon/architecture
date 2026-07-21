@@ -11,8 +11,8 @@
 - **Values:** per-token INT4 (INT8 in the CQ-8 tier).
 - **Outliers:** a **static top-k (k=2)** FP16 outlier-channel lane, selected by a calibrated **ROM mask**.
 - **Tiers:** **CQ-8** (per-token INT8 K+V) · **CQ-4** (per-channel INT4 K / per-token INT4 V, primary) · **CQ-4+** (CQ-4 + k=2 FP16 outlier channels, near-lossless).
-- **Compression:** ~3.8× vs FP16 at ~4 bits/value (measured bits/value ≈ 4.13–4.38 depending on head dim D).
-- **Accuracy:** near-lossless — HellaSwag acc_norm within ~0.4–0.8 pt of FP16 at CQ-4+ on Qwen2-0.5B/1.5B.
+- **Compression:** ~3.8× vs FP16 at ~4 bits/value (measured bits/value ≈ 4.13–4.38 depending on head dim D). *(Codec bit-accounting: INT4 payload + G=128-grouped FP16 scales + k=2 FP16 outlier lane; algorithmic, not a physical-design number.)*
+- **Accuracy:** near-lossless — HellaSwag acc_norm within ~0.4–0.8 pt of FP16 at CQ-4+ on Qwen2-0.5B/1.5B. *(Measured on the lm-eval HellaSwag harness against the FP16 baseline; algorithmic accuracy, not silicon.)*
 - **Provenance:** recipe follows **KIVI (ICML 2024)** / **KVQuant (2024)**; Longhorn's contribution is the streaming silicon implementation. TurboQuant (arXiv 2504.19874) is cited prior work only; its pure history lives on the `legacy/turboquant` branch.
 
 ## Microarchitecture

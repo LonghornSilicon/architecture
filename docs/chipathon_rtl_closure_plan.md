@@ -83,8 +83,14 @@ TIU match. **Honest boundary:** GL-in-the-loop = `mate_pv`/`mate_pv_fp16`/`preci
 **KVE KV storage synthesizes to FF register arrays (no `gf180mcu_fd_ip_sram` macro yet) at a
 depth-2 proxy — NOT real KV capacity** (real SRAM macro = TODO).
 
-**Stage 2 (in progress):** harden `mate_qkt` + `vecu_softmax` on GF180 and extend the GL e2e to
-the full Q·Kᵀ→softmax→P·V datapath.
+**Stage 2 done (2026-07-21, `chipathon-lambda-acu` `8679212`).** `mate_qkt` + `vecu_softmax`
+hardened on GF180 and added to the GL e2e: the full **Q·Kᵀ→softmax→P·V compute datapath** is now
+gate-level verified on gf180 cells (mate_qkt scores rel-err 0.0, softmax weights 2.13e-4,
+closed-loop attention out 5.42e-4 vs reference; Stage-1 no regression). `mate_qkt` closes 6/6.
+**Open item:** `vecu_softmax` misses setup by **−26.5 ns at the `ss_125C_4v50` corner** (its
+fp16→exp-LUT→fp32→fp16 chain is ~366 ns post-route; clean at tt/ff) — fix is **pipelining the exp
+path** (in progress). The remaining gate-level hole is still the KVE `gf180mcu_fd_ip_sram` macro
+(KV storage hardens as FF register arrays at the depth-2 proxy).
 
 ## Risk register (honest)
 

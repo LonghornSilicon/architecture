@@ -73,6 +73,26 @@ Lambda is a **4 mm² (2×2 mm) standalone transformer-decoder ASIC on TSMC 16nm 
 | TIU — Token Importance Unit (Block 3) | 0.03 mm² | Per-block 16-bit attention-entropy accumulator (256 B SRAM); drives MSC eviction (H2O-style) and KVE per-block precision mode. Modeled on arXiv 2604.04722. **NEW 2026-05-14.** |
 | HIF — PCIe Gen3 x1 (M.2 2280) | 0.55 mm² | PCIe Gen3 x1 endpoint (~1 GB/s sustained) for CSR access + microcode load + token I/O. M.2 form factor — slot wires 4 lanes, on-die PHY drives x1 (negotiates down). JTAG via dedicated pins. **Revised from USB-C 2.0 on 2026-05-14.** |
 | **On-chip SRAM (0.8 MB)** | 0.71 mm² | kv_scratchpad 0.4 MB · activation_buffer 0.3 MB · weight_stream_buffer 0.05 MB · codebook_const_rom 64 KB (holds ChannelQuant outlier-channel ROM mask + RoPE + LUTs; id kept for HLS continuity) |
+
+### RTL maturity (honest status, 2026-07-21)
+
+The areas above are **16nm analytical estimates**; they do **not** imply the block exists as
+synthesizable RTL. Actual RTL status:
+
+| Block | RTL status |
+|---|---|
+| **KVE** | RTL-complete, Sky130 sign-off (`kv-cache-engine` repo) |
+| **TIU** | RTL-complete, Sky130 sign-off (`token-importance-unit` repo) |
+| **ACU precision controller** | RTL, Sky130 sign-off (`attention-compute-unit` repo) |
+| **MatE — P·V tile** | RTL, Sky130 sign-off — `mate_pv` (INT8) + `mate_pv_fp16` (FP16 escape). *Only the P·V vector-MAC.* |
+| **MatE — 8×8 systolic array (Q·Kᵀ + GEMM/FFN)** | **no RTL** — arithmetic modeled in `mac_array_ref`. Q·Kᵀ is **Phase 1** of the chipathon plan; the general GEMM/FFN engine is off-chip for the shuttle. |
+| **VecU** | **no RTL, no golden yet** — softmax/RoPE/RMSNorm slice is **Phase 2** of the chipathon plan. |
+| **MSC / LSU / HIF** | spec-level; not in the decode-attention-datapath tapeout boundary. |
+
+The cross-block cosim (`rtl/tb/tb_chip_cosim.sv`) verifies the RTL blocks end-to-end on real
+Qwen tensors; Q·Kᵀ and softmax are currently **reference stand-ins**. Closing them is the
+[chipathon RTL-closure plan](docs/chipathon_rtl_closure_plan.md). "In silicon" language elsewhere
+in this doc refers to the KV-compression path (KVE), which is the block that is actually RTL-signed-off.
 | **LPDDR5X x16 PHY** (vendor IP) | 1.20 mm² ±0.3 | Synopsys DesignWare or Cadence Denali; NDA-gated; load-bearing area uncertainty |
 | I/O ring + pads + ESD | 0.76 mm² | 100 µm ring, 2 kV HBM ESD |
 | Clock + power + routing | 0.50 mm² | ~12.5% of die at 16nm |

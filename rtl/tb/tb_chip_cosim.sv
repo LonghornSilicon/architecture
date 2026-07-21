@@ -32,11 +32,31 @@ module tb_chip_cosim;
         .s_valid(pv_sv), .a_data(pv_a), .v_data(pv_v), .s_last(pv_sl),
         .c_valid(pv_cv), .c_data(pv_c));
 
+    // ===== MatE: FP16 P·V MAC (mate_pv_fp16) — the controller→FP16 escape datapath =====
+    // Same streaming interface as mate_pv, but fp16 operands/result + fp32 accumulator.
+    reg              pv16_sv, pv16_sl;
+    reg  [15:0]      pv16_a;
+    reg  [D*16-1:0]  pv16_v;
+    wire             pv16_cv;
+    wire [D*16-1:0]  pv16_c;
+    mate_pv_fp16 #(.N(D)) u_pv16 (
+        .clk(clk), .rst_n(rst_n),
+        .s_valid(pv16_sv), .a_data(pv16_a), .v_data(pv16_v), .s_last(pv16_sl),
+        .c_valid(pv16_cv), .c_data(pv16_c));
+
     // ================= ACU: precision gate =================
     reg acu_sv, acu_sl; reg signed [7:0] acu_s; wire acu_dv, acu_fp16;
     precision_controller #(.SCORE_WIDTH(8)) u_acu (
         .clk(clk), .rst_n(rst_n), .s_valid(acu_sv), .s_data(acu_s), .s_last(acu_sl),
         .d_valid(acu_dv), .d_fp16(acu_fp16));
+
+    // Tile-sized precision gate for the FP16 escape: N = BLOCK_M*BLOCK_N = 16, so the
+    // (max·N > 10·Σ) decision genuinely discriminates on a 16-position attention tile
+    // (the shared u_acu is sized to the full 4096-score chip tile).
+    reg acu16_sv, acu16_sl; reg signed [7:0] acu16_s; wire acu16_dv, acu16_fp16;
+    precision_controller #(.BLOCK_M(4), .BLOCK_N(4), .SCORE_WIDTH(8)) u_acu16 (
+        .clk(clk), .rst_n(rst_n), .s_valid(acu16_sv), .s_data(acu16_s), .s_last(acu16_sl),
+        .d_valid(acu16_dv), .d_fp16(acu16_fp16));
 
     // ================= TIU: H2O importance =================
     localparam int NS = 8;
@@ -64,6 +84,13 @@ module tb_chip_cosim;
     real scaleA, scaleV, vmax, rr, orot_r, ortl, oref, gmax, adiff, maxrel;
     integer iv, pd;
 
+    // ---- FP16 P·V (escape) working state ----
+    localparam integer PVF     = 8;        // tokens accumulated by the FP16 P·V tile
+    localparam real    PVF_TOL = 0.005;    // FP16 path rel-err gate (rel_err < 5e-3)
+    reg  [15:0] Af16 [0:PVF-1];            // peaked fp16 attention weights (mass on token 0)
+    reg  gate_peak, gate_unif;             // captured gate decisions (peaked / near-uniform)
+    real gg, gmax16, rr16, adiff16, maxrel16;
+
     task step; begin @(negedge clk); end endtask
 
     initial begin
@@ -76,6 +103,7 @@ module tb_chip_cosim;
             for (d=0;d<Dn;d=d+1) begin code=$fscanf(fg,"%h",g32); Ghat[t][d]=g32; end
         end
         $fclose(fv); $fclose(fg);
+        pv16_sv = 0; pv16_sl = 0; acu16_sv = 0; acu16_sl = 0;   // FP16-escape drives idle at reset
         rst_n = 0; repeat(4) step; rst_n = 1; step;
 
         // ========== BLOCK 2 (KVE): reconstruct each token's V̂, check bit-exact ==========
@@ -161,6 +189,69 @@ module tb_chip_cosim;
         $display("[MatE] e2e KVE->P·V->inverse vs Sigma A*Ghat: max rel err %f (%s, tol %.2f)",
                  maxrel, (maxrel<PV_TOL)?"within tol":"OUT OF TOL", PV_TOL);
 
+        // ===== BLOCK 2c (MatE FP16 P·V escape): controller routes a PEAKED tile to FP16,
+        // then the FP16 P·V tile (mate_pv_fp16) computes Σ_t A[t]·V̂rot[t] and is checked
+        // against the sequential-fp32 golden (the faithful streaming order — NOT numpy
+        // BLAS pairwise) within the FP16 path's documented rel_err < 5e-3 tolerance. =====
+        e0 = errors;
+
+        // (1) the precision gate must ROUTE this peaked 16-position tile to FP16 (escape
+        //     genuinely fires — one spike, rest small → max·N > 10·Σ with N=16).
+        for (k=0;k<16;k=k+1) begin
+            step; acu16_sv=1; acu16_sl=(k==15); acu16_s = (k==0) ? 8'sd120 : 8'sd3;
+        end
+        step; acu16_sv=0; acu16_sl=0;
+        k=0; while (acu16_dv !== 1'b1 && k<8) begin step; k=k+1; end
+        gate_peak = acu16_fp16;
+        if (acu16_dv !== 1'b1) begin errors=errors+1; $display("  FP16-escape: gate d_valid never pulsed (peaked)"); end
+        else if (gate_peak !== 1'b1) begin errors=errors+1; $display("  FP16-escape: peaked tile was NOT routed to FP16 (silently INT8!)"); end
+
+        // (2) a near-UNIFORM 16-position tile must STAY INT8 (the gate discriminates).
+        for (k=0;k<16;k=k+1) begin
+            step; acu16_sv=1; acu16_sl=(k==15); acu16_s = 8'sd30;
+        end
+        step; acu16_sv=0; acu16_sl=0;
+        k=0; while (acu16_dv !== 1'b1 && k<8) begin step; k=k+1; end
+        gate_unif = acu16_fp16;
+        if (acu16_dv !== 1'b1) begin errors=errors+1; $display("  FP16-escape: gate d_valid never pulsed (uniform)"); end
+        else if (gate_unif !== 1'b0) begin errors=errors+1; $display("  FP16-escape: near-uniform tile wrongly routed to FP16"); end
+
+        // (3) drive the FP16 P·V tile with the peaked attention weights + the KVE's rotated
+        //     V̂ (fp16, from BLOCK 2b's stash) — the real in-context escape datapath.
+        Af16[0] = cq_fp_pkg::real_to_f16(0.86);                       // mass concentrated on token 0
+        for (t=1;t<PVF;t=t+1) Af16[t] = cq_fp_pkg::real_to_f16(0.02);
+        for (t=0;t<PVF;t=t+1) begin
+            step;
+            pv16_sv = 1; pv16_a = Af16[t]; pv16_sl = (t==PVF-1);
+            for (d=0;d<D;d=d+1) pv16_v[d*16 +: 16] = rotv16[t*D+d];
+        end
+        step; pv16_sv = 0; pv16_sl = 0;
+        pd = 0; while (pv16_cv !== 1'b1 && pd < 8) begin step; pd = pd + 1; end
+        if (pv16_cv !== 1'b1) begin errors=errors+1; $display("  FP16 P·V c_valid never pulsed"); end
+        else begin
+            // sequential-fp32 golden: o[d] = Σ_t f16(A[t])·f16(V̂rot[t][d]), streaming order.
+            // (Accumulated in the TB's fp64 real — for this short reduction fp64-seq and
+            //  fp32-seq agree to far below fp16 precision; compare RTL fp16 out within tol.)
+            gmax16 = 1.0e-9;
+            for (d=0;d<D;d=d+1) begin
+                gg = 0.0;
+                for (t=0;t<PVF;t=t+1) gg = gg + cq_fp_pkg::f16_to_real(Af16[t])*cq_fp_pkg::f16_to_real(rotv16[t*D+d]);
+                rr16 = (gg<0.0) ? -gg : gg; if (rr16>gmax16) gmax16 = rr16;
+            end
+            maxrel16 = 0.0;
+            for (d=0;d<D;d=d+1) begin
+                gg = 0.0;
+                for (t=0;t<PVF;t=t+1) gg = gg + cq_fp_pkg::f16_to_real(Af16[t])*cq_fp_pkg::f16_to_real(rotv16[t*D+d]);
+                rr16 = cq_fp_pkg::f16_to_real(pv16_c[d*16 +: 16]);
+                adiff16 = rr16 - gg; if (adiff16<0.0) adiff16=-adiff16;
+                if (adiff16/gmax16 > maxrel16) maxrel16 = adiff16/gmax16;
+            end
+            if (maxrel16 >= PVF_TOL) begin errors=errors+1; $display("  FP16 P·V OUT OF TOL: max rel err %f (tol %.3f)", maxrel16, PVF_TOL); end
+        end
+        $display("[MatE] FP16 P·V escape: gate routes FP16=%0b (peaked) / FP16=%0b (uniform) -> escape %s; tile Sigma A*Vhat max rel err %f vs seq-fp32 golden (%s, tol %.3f)",
+                 gate_peak, gate_unif, (gate_peak==1'b1 && gate_unif==1'b0)?"FIRED & discriminates":"BROKEN",
+                 maxrel16, (errors==e0)?"within tol":"FAIL", PVF_TOL);
+
         // ========== BLOCK 3 (TIU): install slots, accumulate mass, keep-tier + evict ==========
         // masses derived from the tile (per-token amax magnitude, quantized to a weight)
         e0 = errors;
@@ -197,7 +288,7 @@ module tb_chip_cosim;
                  (errors==e0)?"match reference":"MISMATCH", acu_fp16);
 
         $display("");
-        $display("CROSS-BLOCK COSIM (ACU + KVE + MatE P·V + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
+        $display("CROSS-BLOCK COSIM (ACU + KVE + MatE P·V INT8+FP16 + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
         $finish;
     end
 endmodule

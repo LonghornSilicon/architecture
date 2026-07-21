@@ -87,10 +87,18 @@ depth-2 proxy — NOT real KV capacity** (real SRAM macro = TODO).
 hardened on GF180 and added to the GL e2e: the full **Q·Kᵀ→softmax→P·V compute datapath** is now
 gate-level verified on gf180 cells (mate_qkt scores rel-err 0.0, softmax weights 2.13e-4,
 closed-loop attention out 5.42e-4 vs reference; Stage-1 no regression). `mate_qkt` closes 6/6.
-**Open item:** `vecu_softmax` misses setup by **−26.5 ns at the `ss_125C_4v50` corner** (its
-fp16→exp-LUT→fp32→fp16 chain is ~366 ns post-route; clean at tt/ff) — fix is **pipelining the exp
-path** (in progress). The remaining gate-level hole is still the KVE `gf180mcu_fd_ip_sram` macro
-(KV storage hardens as FF register arrays at the depth-2 proxy).
+**Timing closed (2026-07-21, `chipathon-lambda-acu` `c63e705`):** `vecu_softmax` was pipelined
+(3-stage exp/rescale/accumulate split, +358 FFs, bit-exact, cosim re-confirmed `ALL BLOCKS PASS`)
+and re-hardened — ss-corner setup **−26.5 ns → +19.2 ns** at a tightened 300 ns clock. **All seven
+compute macros now meet setup AND hold at every corner**, setup TNS = 0. GL e2e still ALL PASS.
+
+**Remaining honest items (none block correctness; setup/hold/DRC/LVS closed):**
+1. **KVE `gf180mcu_fd_ip_sram` macro** — the one gate-level hole; KV storage hardens as FF
+   register arrays at the depth-2 proxy today (not real KV capacity).
+2. **`vecu_softmax` area reclaim** — the aggressive resize to hit ss ~2×'d its cells (55k→101k,
+   1.49 mm²); a more even pipeline split / higher utilisation reclaims it.
+3. **ss-corner max-transition (slew)** on the large fp16 / register-array blocks — physical-opt
+   follow-up (does not affect setup/hold/DRC/LVS).
 
 ## Risk register (honest)
 

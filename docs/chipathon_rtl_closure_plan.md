@@ -70,6 +70,22 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 | **4 — GF180 hardening** *(in `chipathon-lambda-acu`)* | Harden each block as a GF180 LibreLane macro (start with the already-signed logic blocks to de-risk the port early: precision-controller, mate_pv); then the integrated ACU (KVE SRAM macros, floorplan, hierarchy); 6 sign-off checks | — | clean GF180 sign-off per macro |
 | **5 — Padring + submit** *(in `chipathon-lambda-acu`)* | `chip_core.sv` workshop-slot override + serial/SPI loader (≈20 pads ≪ D=128), stitch macros into the chipathon-2026 padring fork, cocotb GL sim, final GDS, MPW submit | — | shuttle-ready package |
 
+## GF180 verification status
+
+**Stage 1 done (2026-07-21, `chipathon-lambda-acu` `cde0bf2`, `docs/gf180_gls_report.md`).**
+All five already-RTL blocks hardened on GF180MCU (LibreLane 3.0.5 via docker, gf180mcuD PDK):
+setup/hold/DRC/LVS/antenna **clean** (residual max-transition only at the extreme `ss_125C_4v50`
+corner; tt/ff clean; precision-controller clean at all corners). **Gate-level end-to-end GLS**
+(`tb/tb_gls_e2e.sv`) reproduces the cosim on a real Qwen tile against the hardened netlists +
+gf180 cells: INT8 P·V **int32 bit-exact**, FP16 P·V **1.74e-4**, ACU gate matches & discriminates,
+TIU match. **Honest boundary:** GL-in-the-loop = `mate_pv`/`mate_pv_fp16`/`precision_controller`/
+`token_importance_unit`; KVE reconstruct is the small combinational RTL path feeding the GL P·V;
+**KVE KV storage synthesizes to FF register arrays (no `gf180mcu_fd_ip_sram` macro yet) at a
+depth-2 proxy — NOT real KV capacity** (real SRAM macro = TODO).
+
+**Stage 2 (in progress):** harden `mate_qkt` + `vecu_softmax` on GF180 and extend the GL e2e to
+the full Q·Kᵀ→softmax→P·V datapath.
+
 ## Risk register (honest)
 
 - ~~**VecU is the long pole** — no golden model exists yet (write `vecu.py` before RTL); the

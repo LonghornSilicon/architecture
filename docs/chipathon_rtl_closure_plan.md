@@ -1,10 +1,23 @@
 # Chipathon RTL-Closure Plan — Decode Attention Datapath (Sky130)
 
-**Decided 2026-07-21.** Target: an open-source **Sky130** MPW tapeout for the chipathon,
-~2–3 months runway. Boundary: the **decode attention datapath** — the coherent completion
-of the RTL we have actually built. Projections (QKV/output) and the FFN GEMMs run **off-chip**
-(host-fed) for this shuttle; the general 8×8 systolic GEMM/FFN engine is a larger, separate
-program that can be added later.
+**Decided 2026-07-21.** Target: the **SSCS Chipathon 2026** shuttle on **GF180MCU**
+(GlobalFoundries 180nm, LibreLane multi-macro; template `sscs-chipathon-2026`
+`examples/librelane_rtl2gds_gf180/04_counter_alu_multimacro`), ~2–3 months runway.
+**PDK locked = GF180MCU.** The
+Sky130 sign-offs we already have become **dev-vehicle proofs** (the RTL is physical); the shuttle
+re-hardens on GF180. Boundary: the **decode attention datapath** — the coherent completion of the
+RTL we have actually built. Projections (QKV/output) and the FFN GEMMs run **off-chip** (host-fed)
+for this shuttle; the general 8×8 systolic GEMM/FFN engine is a larger, separate program that can
+be added later.
+
+## Repo-of-record split (standing convention, 2026-07-21)
+
+- **Block RTL + block-level verification** live on each block's **own repo**, on its `rtl` branch
+  (`kv-cache-engine`, `token-importance-unit`, `attention-compute-unit`, and the cross-block cosim
+  in `architecture`). This is where RTL is authored, unit-tested, and committed.
+- **PDK work — GF180 LibreLane hardening, multi-macro integration, padring, GDSII, the tapeout
+  package** — lives in the **`chipathon-lambda-acu`** repo. It pulls each block's RTL in as a
+  hardened macro; it does not author block RTL.
 
 ## Why this boundary
 
@@ -53,8 +66,8 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 | **1 — MatE Q·Kᵀ** | Decode Q·Kᵀ reduction engine (INT8 Q × per-channel FP16 K → L scores); golden from `mac_array_ref`; bit-exact/toleranced TB; swap into cosim BLOCK 1 | scores → **real RTL** | full cosim `ALL BLOCKS PASS` |
 | **2 — VecU softmax slice** | Write `vecu.py` golden first (does not exist); then single-row online-softmax + exp LUT + RoPE + RMSNorm; toleranced TB; swap into cosim | probabilities → **real RTL** | full cosim green |
 | **3 — Integrate** | ACU top wrapper + mini decode-step control FSM; full-datapath cosim on real Qwen tiles | **stand-ins = 0** | end-to-end green |
-| **4 — Sky130 GDSII** | Harden integrated ACU (KVE SRAM macros, floorplan, hierarchy); 6 sign-off checks at top | — | clean sign-off |
-| **5 — Tapeout harness** | Efabless/Caravel (or OpenFrame) integration, IO ring, final GDS, MPW submit | — | shuttle-ready |
+| **4 — GF180 hardening** *(in `chipathon-lambda-acu`)* | Harden each block as a GF180 LibreLane macro (start with the already-signed logic blocks to de-risk the port early: precision-controller, mate_pv); then the integrated ACU (KVE SRAM macros, floorplan, hierarchy); 6 sign-off checks | — | clean GF180 sign-off per macro |
+| **5 — Padring + submit** *(in `chipathon-lambda-acu`)* | `chip_core.sv` workshop-slot override + serial/SPI loader (≈20 pads ≪ D=128), stitch macros into the chipathon-2026 padring fork, cocotb GL sim, final GDS, MPW submit | — | shuttle-ready package |
 
 ## Risk register (honest)
 

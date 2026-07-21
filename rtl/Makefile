@@ -5,7 +5,7 @@ IV     = iverilog -g2012
 VVP    = vvp
 KVE    = blocks/kve/cq_fp_pkg.sv blocks/kve/cq_units.sv blocks/kve/wht_unit.sv \
          blocks/kve/wht_inverse_out.sv blocks/kve/cq_value_path_wht.sv
-ACU    = blocks/acu/precision_controller.sv blocks/acu/mate_pv.sv blocks/acu/mate_pv_fp16.sv blocks/acu/mate_qkt.sv
+ACU    = blocks/acu/precision_controller.sv blocks/acu/mate_pv.sv blocks/acu/mate_pv_fp16.sv blocks/acu/mate_qkt.sv blocks/acu/vecu_softmax.sv
 TIU    = blocks/tiu/token_importance_unit.sv
 
 .PHONY: cosim clean

@@ -7,6 +7,7 @@ Bit-accurate Python reference implementations for every Lambda block. The HLS C+
 - `mate.py` — MatE PE microarchitecture + 8×8 systolic array + INT8×INT4 + FP16 (P·V) + INT24 K-axis acc. INT8×INT4 for weight/FFN GEMMs, plus a per-tile FP16 P·V mode selected by the ACU precision controller. Both dataflow modes (weight-stationary, output-stationary for Q·K^T).
 - `kce.py` — KVE ChannelQuant reference: per-channel INT4 K (grouped G=128, D FP16 scales) + per-token INT4 V + static top-k (k=2) FP16 outlier lane via ROM mask; decompress = per-channel `INT4·FP16`; tiers CQ-8/CQ-4/CQ-4+. *(File name kept for HLS continuity; ChannelQuant is not codebook-based.)*
 - `vecu.py` — 8-lane FP/BF SIMD + exp/rsqrt/sigmoid LUTs + online softmax + RoPE.
+  - **Decode online-softmax slice: written** — `attention-compute-unit/sw/reference_model/vecu_softmax_ref.py` (64-entry exp LUT + linear interp + online running-max/running-sum recurrence with the `exp(m_old-m_new)` rescale; the golden the `vecu_softmax` RTL is bit-exact to). RoPE / RMSNorm / SiLU / the full 8-lane microcode are still to be written.
 - `msc.py` — 128-entry block table + DMA FSM + LPDDR timing model (high-level).
 - `lsu.py` — 32-inst decoder + 3-lane dispatch + register file.
 - `hif.py` — CSR access + doorbell + JTAG (control-plane only; no USB protocol emulation).

@@ -87,11 +87,13 @@ synthesizable RTL. Actual RTL status:
 | **MatE — P·V tile** | RTL, Sky130 sign-off — `mate_pv` (INT8) + `mate_pv_fp16` (FP16 escape). *Only the P·V vector-MAC.* |
 | **MatE — Q·Kᵀ decode scoring** | **RTL** — `mate_qkt` (INT8 Q × per-channel FP16 K → L scores), bit-exact to `mac_array_ref` sequential-fp32 golden, live in the cosim BLOCK 1 (Phase 1 done 2026-07-21, `attention-compute-unit` `rtl` `93e9960`). GF180 hardening pending (Phase 4). |
 | **MatE — 8×8 systolic array (general GEMM/FFN)** | **no RTL** — off-chip for the shuttle; the general weight-stationary GEMM/FFN engine is a separate later program. |
-| **VecU** | **no RTL, no golden yet** — softmax/RoPE/RMSNorm slice is **Phase 2** of the chipathon plan. |
+| **VecU — decode online-softmax** | **RTL** — `vecu_softmax` (64-entry exp LUT + linear interp + online running-max/running-sum recurrence, fp32 accumulator → fp16 weights), bit-exact to `sw/reference_model/vecu_softmax_ref.py` (LUT golden ≈2% vs exact fp64 softmax), live in the cosim BLOCK 2d (Phase 2 done 2026-07-21, `attention-compute-unit` `rtl` `4a30d93`). RoPE / RMSNorm slices still pending (chip-top raw-Q/K path). GF180 hardening pending (Phase 4). |
 | **MSC / LSU / HIF** | spec-level; not in the decode-attention-datapath tapeout boundary. |
 
 The cross-block cosim (`rtl/tb/tb_chip_cosim.sv`) verifies the RTL blocks end-to-end on real
-Qwen tensors; Q·Kᵀ and softmax are currently **reference stand-ins**. Closing them is the
+Qwen tensors. The decode attention pass **Q·Kᵀ → softmax → P·V is now all real RTL**
+(`mate_qkt → vecu_softmax → mate_pv_fp16`); the remaining stand-ins are RoPE / RMSNorm (the
+loaded Qwen tiles are already RoPE'd, so they only matter for the chip-top raw-Q/K path). See the
 [chipathon RTL-closure plan](docs/chipathon_rtl_closure_plan.md). "In silicon" language elsewhere
 in this doc refers to the KV-compression path (KVE), which is the block that is actually RTL-signed-off.
 | **LPDDR5X x16 PHY** (vendor IP) | 1.20 mm² ±0.3 | Synopsys DesignWare or Cadence Denali; NDA-gated; load-bearing area uncertainty |

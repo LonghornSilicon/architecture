@@ -61,7 +61,9 @@ module tb_chip_cosim;
     // ===== MatE: Q·Kᵀ decode-scoring engine (mate_qkt) — the real score source =====
     // Scores one INT8 query against LQK per-channel-dequantized fp16 keys, reducing
     // over the head-dim DQK. Replaces the hard-coded score row feeding the ACU gate.
-    localparam integer LQK = 16;         // keys scored (= precision-gate score row length)
+    // LQK also = the number of cached tokens the decode attention pass runs over
+    // (Q·Kᵀ scores -> softmax weights -> P·V), so it matches the KVE V̂ token count.
+    localparam integer LQK = 8;          // keys/tokens scored (= score row length)
     localparam integer DQK = 64;         // head-dim reduction length
     reg               qkt_sv, qkt_sl;
     reg  signed [7:0] qkt_q;
@@ -72,6 +74,18 @@ module tb_chip_cosim;
         .clk(clk), .rst_n(rst_n),
         .s_valid(qkt_sv), .a_data(qkt_q), .k_data(qkt_k), .s_last(qkt_sl),
         .c_valid(qkt_cv), .c_data(qkt_c));
+
+    // ===== VecU: decode online-softmax slice (vecu_softmax) — real attention weights =====
+    // Turns the LQK mate_qkt scores into LQK fp16 attention weights (exp-LUT online
+    // softmax), which then feed the FP16 P·V — closing Q·Kᵀ -> softmax -> P·V in RTL.
+    reg               sm_sv, sm_sl;
+    reg  [15:0]       sm_s;
+    wire              sm_wv, sm_wl, sm_busy;
+    wire [15:0]       sm_w;
+    vecu_softmax #(.N(LQK)) u_sm (
+        .clk(clk), .rst_n(rst_n),
+        .s_valid(sm_sv), .s_data(sm_s), .s_last(sm_sl),
+        .w_valid(sm_wv), .w_data(sm_w), .w_last(sm_wl), .busy(sm_busy));
 
     // ================= TIU: H2O importance =================
     localparam int NS = 8;
@@ -112,8 +126,15 @@ module tb_chip_cosim;
     reg  [15:0]  Kf [0:LQK*DQK-1];         // per-channel-dequantized fp16 keys (KVE key path)
     reg  [15:0]  ksc;                      // per-channel fp16 key scale
     integer sc_i8 [0:LQK-1];               // int8-quantized scores fed to the gate
+    reg  signed [7:0] qc;                  // per-key query·key code (score-spread control)
     real gmaxq, rrq, adq, maxrelq, smaxq, sscaleq;
     integer iq;
+
+    // ---- decode closed-loop (Q·Kᵀ -> softmax -> P·V) working state ----
+    localparam real SM_TOL   = 0.05;       // softmax weights vs exact softmax (absorbs ~2% LUT err)
+    localparam real PVSM_TOL = 0.06;       // attention output vs reference (softmax LUT thru P·V)
+    reg  [15:0] Wsm [0:LQK-1];             // vecu_softmax attention weights (fp16)
+    real smax_r, sumexp, refw_n, wmaxrel;
 
     task step; begin @(negedge clk); end endtask
 
@@ -129,6 +150,7 @@ module tb_chip_cosim;
         $fclose(fv); $fclose(fg);
         pv16_sv = 0; pv16_sl = 0; acu16_sv = 0; acu16_sl = 0;   // FP16-escape drives idle at reset
         qkt_sv = 0; qkt_sl = 0;                                 // Q·Kᵀ scorer idle at reset
+        sm_sv = 0; sm_sl = 0;                                   // softmax slice idle at reset
         rst_n = 0; repeat(4) step; rst_n = 1; step;
 
         // ========== BLOCK 2 (KVE): reconstruct each token's V̂, check bit-exact ==========
@@ -302,15 +324,19 @@ module tb_chip_cosim;
         // KVE's per-channel-dequantized fp16 keys (cq_dequant_f16 = round_fp16(code·
         // scale)) — replacing the hard-coded stand-in — then quantized to int8 (per-tile
         // symmetric, matching integration_example.quantize_int8) and gated by the
-        // precision controller. Keys are built peaked (key 0 aligned with Q) so one
-        // score dominates the row and the gate routes FP16 (as the original stand-in did).
+        // precision controller. Keys give a spread of scores in a softmax-friendly
+        // range (key l dequantizes to code_l/64, so score_l = Σ_d 1·(code_l/64) =
+        // code_l): a real distribution the downstream softmax must resolve, while the
+        // gate still routes FP16.
         e0 = errors;
-        for (d=0;d<DQK;d=d+1) Qi[d] = 8'sd100;                 // query: +100 on every channel
-        ksc = cq_fp_pkg::real_to_f16(0.02);                    // per-channel fp16 key scale
-        for (d=0;d<DQK;d=d+1) begin
-            Kf[0*DQK+d] = cq_fp_pkg::cq_dequant_f16(8'sd100, ksc);              // key 0: aligned/big
-            for (n=1;n<LQK;n=n+1)
-                Kf[n*DQK+d] = cq_fp_pkg::cq_dequant_f16($signed(1 + (n%3)), ksc); // others: small
+        for (d=0;d<DQK;d=d+1) Qi[d] = 8'sd1;                   // query: +1 on every channel
+        ksc = cq_fp_pkg::real_to_f16(1.0/64.0);               // per-channel fp16 key scale
+        for (n=0;n<LQK;n=n+1) begin
+            case (n)                                          // score targets (moderate spread)
+                0: qc = 8'sd3;  1: qc = 8'sd1;  2: qc = 8'sd0;  3: qc = -8'sd1;
+                4: qc = 8'sd2;  5: qc = -8'sd2; 6: qc = 8'sd1;  default: qc = -8'sd3;
+            endcase
+            for (d=0;d<DQK;d=d+1) Kf[n*DQK+d] = cq_fp_pkg::cq_dequant_f16(qc, ksc);
         end
         // stream the DQK head-dim channels through mate_qkt
         for (d=0;d<DQK;d=d+1) begin
@@ -360,8 +386,71 @@ module tb_chip_cosim;
         $display("[ACU ] Q·Kᵀ(mate_qkt) scores -> precision gate: scores rel-err %f (<%.3f), gate fp16=%0b: %s",
                  maxrelq, QKT_TOL, acu_fp16, (errors==e0)?"match reference":"MISMATCH");
 
+        // ========== BLOCK 2d (decode closed loop: Q·Kᵀ -> softmax -> P·V) ==========
+        // The attention weights feeding the FP16 P·V are now COMPUTED by vecu_softmax
+        // from the mate_qkt scores (replacing the reference-supplied weights) — the whole
+        // decode attention pass is real RTL. Weights are checked against exact fp64
+        // softmax; the P·V attention output against the reference attention within a
+        // tolerance set from the measured ~2% exp-LUT error propagating through P·V.
+        e0 = errors;
+        // (1) stream the LQK mate_qkt scores through vecu_softmax, collect the weights
+        for (n=0;n<LQK;n=n+1) begin
+            step; sm_sv=1; sm_s=qkt_c[n*16 +: 16]; sm_sl=(n==LQK-1);
+        end
+        step; sm_sv=0; sm_sl=0;
+        k=0; pd=0;
+        while (k<LQK && pd<(LQK+40)) begin
+            step;
+            if (sm_wv) begin Wsm[k]=sm_w; k=k+1; end
+            pd=pd+1;
+        end
+        if (k !== LQK) begin errors=errors+1; $display("  softmax: only %0d of %0d weights emitted", k, LQK); end
+        else begin
+            // reference exact-fp64 softmax of the (fp16) scores
+            smax_r = -1.0e30;
+            for (n=0;n<LQK;n=n+1) begin rrq=cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]); if (rrq>smax_r) smax_r=rrq; end
+            sumexp = 0.0;
+            for (n=0;n<LQK;n=n+1) sumexp = sumexp + $exp(cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]) - smax_r);
+            // (2) softmax weights vs reference softmax
+            wmaxrel = 0.0;
+            for (n=0;n<LQK;n=n+1) begin
+                refw_n = $exp(cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]) - smax_r) / sumexp;
+                adq = cq_fp_pkg::f16_to_real(Wsm[n]) - refw_n; if (adq<0.0) adq=-adq;
+                if (adq > wmaxrel) wmaxrel = adq;   // weights <= 1, so abs err ~ rel-to-1
+            end
+            if (wmaxrel >= SM_TOL) begin errors=errors+1; $display("  softmax weights OUT OF TOL: %f (tol %.3f)", wmaxrel, SM_TOL); end
+        end
+        // (3) feed the softmax weights to the FP16 P·V over the KVE's rotated V̂
+        for (t=0;t<LQK;t=t+1) begin
+            step; pv16_sv=1; pv16_a=Wsm[t]; pv16_sl=(t==LQK-1);
+            for (d=0;d<D;d=d+1) pv16_v[d*16 +: 16] = rotv16[t*D+d];
+        end
+        step; pv16_sv=0; pv16_sl=0;
+        pd=0; while (pv16_cv !== 1'b1 && pd<8) begin step; pd=pd+1; end
+        if (pv16_cv !== 1'b1) begin errors=errors+1; $display("  closed-loop P·V c_valid never pulsed"); end
+        else begin
+            // reference attention: o_ref[d] = Σ_t softmax_ref[t]·V̂[t][d]
+            gmax16 = 1.0e-9;
+            for (d=0;d<D;d=d+1) begin
+                gg=0.0;
+                for (t=0;t<LQK;t=t+1) gg = gg + ($exp(cq_fp_pkg::f16_to_real(qkt_c[t*16 +: 16])-smax_r)/sumexp)*cq_fp_pkg::f16_to_real(rotv16[t*D+d]);
+                rr16 = (gg<0.0)?-gg:gg; if (rr16>gmax16) gmax16=rr16;
+            end
+            maxrel16 = 0.0;
+            for (d=0;d<D;d=d+1) begin
+                gg=0.0;
+                for (t=0;t<LQK;t=t+1) gg = gg + ($exp(cq_fp_pkg::f16_to_real(qkt_c[t*16 +: 16])-smax_r)/sumexp)*cq_fp_pkg::f16_to_real(rotv16[t*D+d]);
+                rr16 = cq_fp_pkg::f16_to_real(pv16_c[d*16 +: 16]);
+                adiff16 = rr16-gg; if (adiff16<0.0) adiff16=-adiff16;
+                if (adiff16/gmax16 > maxrel16) maxrel16 = adiff16/gmax16;
+            end
+            if (maxrel16 >= PVSM_TOL) begin errors=errors+1; $display("  closed-loop P·V OUT OF TOL: %f (tol %.3f)", maxrel16, PVSM_TOL); end
+        end
+        $display("[VecU] decode Q·Kᵀ->softmax->P·V closed loop (weights = vecu_softmax RTL): softmax err %f (<%.3f), attn-out rel-err %f (<%.3f): %s",
+                 wmaxrel, SM_TOL, maxrel16, PVSM_TOL, (errors==e0)?"within tol":"FAIL");
+
         $display("");
-        $display("CROSS-BLOCK COSIM (MatE Q·Kᵀ + ACU gate + KVE + MatE P·V INT8+FP16 + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
+        $display("CROSS-BLOCK COSIM (decode Q·Kᵀ->softmax->P·V all-RTL + ACU gate + KVE + INT8/FP16 P·V + TIU): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
         $finish;
     end
 endmodule

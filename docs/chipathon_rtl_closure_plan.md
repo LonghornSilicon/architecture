@@ -56,7 +56,8 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 | BLOCK 3 (TIU) keep-tier + evict | **real RTL** |
 | BLOCK 1 (ACU) precision gate | **real RTL** |
 | **Q·Kᵀ score row** | **real RTL** (`mate_qkt`) — Phase 1 done 2026-07-21 |
-| **softmax / RoPE / RMSNorm** | reference stand-in ← **Phase 2** |
+| **softmax** | **real RTL** (`vecu_softmax`) — Phase 2 done 2026-07-21; **softmax-path stand-ins → 0** |
+| **RoPE / RMSNorm** | reference stand-in (chip-top raw-Q/K path only; loaded Qwen tiles are pre-RoPE'd) ← integration |
 
 ## Phases
 
@@ -64,15 +65,18 @@ Current cosim (post FP16 wiring, commit `2aaa471`):
 |---|---|---|---|
 | **0** (now) | Plan doc; RTL-maturity honesty in STATUS; finish FP16 wiring (done) | stand-ins labeled | — |
 | **1 — MatE Q·Kᵀ** ✅ done | Decode Q·Kᵀ reduction engine (INT8 Q × per-channel FP16 K → L scores); golden from `mac_array_ref`; bit-exact/toleranced TB; swap into cosim BLOCK 1 | scores → **real RTL** ✅ | full cosim `ALL BLOCKS PASS` ✅ (scores rel-err 4e-6) |
-| **2 — VecU softmax slice** | Write `vecu.py` golden first (does not exist); then single-row online-softmax + exp LUT + RoPE + RMSNorm; toleranced TB; swap into cosim | probabilities → **real RTL** | full cosim green |
+| **2 — VecU softmax slice** ✅ done | Wrote the golden first (`sw/reference_model/vecu_softmax_ref.py` in `attention-compute-unit`); single-row online-softmax + 64-entry exp LUT + linear interp + `exp(m_old-m_new)` rescale, fp32 accumulator; bit-exact TB + LUT-vs-exact bar (≈2%); swapped into cosim BLOCK 2d | probabilities → **real RTL** ✅ (softmax-path stand-ins → 0) | full cosim `ALL BLOCKS PASS` ✅ (softmax weights err 2e-4, attn-out rel-err 7e-4) |
 | **3 — Integrate** | ACU top wrapper + mini decode-step control FSM; full-datapath cosim on real Qwen tiles | **stand-ins = 0** | end-to-end green |
 | **4 — GF180 hardening** *(in `chipathon-lambda-acu`)* | Harden each block as a GF180 LibreLane macro (start with the already-signed logic blocks to de-risk the port early: precision-controller, mate_pv); then the integrated ACU (KVE SRAM macros, floorplan, hierarchy); 6 sign-off checks | — | clean GF180 sign-off per macro |
 | **5 — Padring + submit** *(in `chipathon-lambda-acu`)* | `chip_core.sv` workshop-slot override + serial/SPI loader (≈20 pads ≪ D=128), stitch macros into the chipathon-2026 padring fork, cocotb GL sim, final GDS, MPW submit | — | shuttle-ready package |
 
 ## Risk register (honest)
 
-- **VecU is the long pole** — no golden model exists yet (write `vecu.py` before RTL); the
-  transcendental LUTs + rescale are fiddly.
+- ~~**VecU is the long pole** — no golden model exists yet (write `vecu.py` before RTL); the
+  transcendental LUTs + rescale are fiddly.~~ **Resolved (Phase 2, 2026-07-21):** the decode
+  online-softmax golden + `vecu_softmax` RTL are written and bit-exact; the 64-entry exp LUT
+  carries ≈2% error vs exact softmax (the P·V-vs-reference cosim tolerance is set from it).
+  RoPE / RMSNorm remain for integration but are not on the decode-softmax critical path.
 - **Top-level Sky130 close** — the integrated datapath is far larger than the individual tiles;
   the KVE SRAM macros make floorplanning real.
 - **2–3 months is tight but plausible** *with the decode simplification + parallel agents*. It is

@@ -187,7 +187,7 @@ definitive_features_and_blocks:
     - id: VecU
       name: Vector Unit — 8-lane SIMD with online softmax
       function: |
-        Programmable SIMD for online softmax (FlashAttention-3 style), RMSNorm,
+        Programmable SIMD for online softmax (Milakov & Gimelshein 2018 recurrence; FlashAttention-style tiling), RMSNorm,
         SiLU/GELU, RoPE pair-rotation, residual add, sampling.
       lanes: 8
       lane_bit_width: 16                                       # FP16/BF16 accumulate
@@ -482,7 +482,7 @@ definitive_features_and_blocks:
       - multi_query (MQA — degenerate GQA, 1 KV head)
     attention_algorithms_supported:
       - vanilla full attention
-      - flash_attention_3 online softmax (microcoded in VecU)
+      - online softmax recurrence (Milakov & Gimelshein 2018; FlashAttention-style tiling), microcoded in VecU
       - paged_attention (vLLM block table in MSC)
     serving_features_in_hardware:
       - boot_time_model_load (LSU schedule loaded over PCIe Gen3 x1)
@@ -1033,7 +1033,7 @@ blocks:
         - rotary_pair_rotate                                   # RoPE
       microcode_capacity: 1k_instructions
     online_softmax_specifics:
-      algorithm: FlashAttention-3 style online softmax
+      algorithm: online softmax recurrence (Milakov & Gimelshein 2018; FlashAttention-style tiling)
       m_running_max_buffer: 8_lanes_x_16b
       l_running_sum_buffer: 8_lanes_x_16b
     area_mm2: 0.15

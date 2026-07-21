@@ -14,7 +14,7 @@
 
 Every non-GEMM operation in a transformer (RoPE, RMSNorm, online softmax, SiLU/GELU, residual add, sampling) runs here. One programmable block has smaller verification surface than four fixed-function blocks — that's the structural decision. The microcode programs are the "ISA" of this block.
 
-## FlashAttention-3 online softmax microcode
+## Online-softmax microcode (Milakov & Gimelshein 2018 recurrence; FlashAttention-style tiling)
 
 Heart of the chip. Per attention row, each lane keeps (m_i, l_i, O_i) running state. New tile arrives → rescale + accumulate. ~32 µops per tile. See `dataflow_walkthrough.md` Stage 9 for the algorithm.
 

@@ -156,13 +156,13 @@ The output is the scores tensor — one number per past token in the context, pe
 
 ---
 
-## Stage 9 — VecU runs online softmax (the heart of FlashAttention-3)
+## Stage 9 — VecU runs online softmax (the running-max/running-sum recurrence)
 
 LSU fires `ISSUE_VEC_U softmax_online, scores`. This is the cleverest microcode in the chip.
 
 Naive softmax computes `exp(scores - max(scores)) / sum(exp(...))` — but this requires materializing the *entire* attention score matrix in SRAM before you can compute the max and the sum. With 3000-token context × 8 heads × 16-bit, that's 50 KB just for the matrix — already pushing the activation buffer.
 
-The **FlashAttention-3 online algorithm** instead processes scores in tiles of (say) 32 at a time. Per attention row, VecU keeps just two running scalars — `m_i` (running max) and `l_i` (running sum-of-exps) — plus the running output accumulator `O_i`. When a new tile arrives:
+The **online-softmax recurrence** (Milakov & Gimelshein, 2018 — arXiv:1805.02867; the same running-max/running-sum core used identically in FlashAttention-1/2/3, which added the IO-aware *tiling* around it) instead processes scores in tiles of (say) 32 at a time. Per attention row, VecU keeps just two running scalars — `m_i` (running max) and `l_i` (running sum-of-exps) — plus the running output accumulator `O_i`. When a new tile arrives:
 
 1. Compute the new tile's max: `m_new = max(m_old, max(tile))`
 2. Rescale the existing accumulators: `l_old *= exp(m_old - m_new)`, `O_old *= exp(m_old - m_new)`

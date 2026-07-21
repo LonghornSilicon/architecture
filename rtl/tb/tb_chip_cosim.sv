@@ -58,6 +58,21 @@ module tb_chip_cosim;
         .clk(clk), .rst_n(rst_n), .s_valid(acu16_sv), .s_data(acu16_s), .s_last(acu16_sl),
         .d_valid(acu16_dv), .d_fp16(acu16_fp16));
 
+    // ===== MatE: Q·Kᵀ decode-scoring engine (mate_qkt) — the real score source =====
+    // Scores one INT8 query against LQK per-channel-dequantized fp16 keys, reducing
+    // over the head-dim DQK. Replaces the hard-coded score row feeding the ACU gate.
+    localparam integer LQK = 16;         // keys scored (= precision-gate score row length)
+    localparam integer DQK = 64;         // head-dim reduction length
+    reg               qkt_sv, qkt_sl;
+    reg  signed [7:0] qkt_q;
+    reg  [LQK*16-1:0] qkt_k;
+    wire              qkt_cv;
+    wire [LQK*16-1:0] qkt_c;
+    mate_qkt #(.N(LQK)) u_qkt (
+        .clk(clk), .rst_n(rst_n),
+        .s_valid(qkt_sv), .a_data(qkt_q), .k_data(qkt_k), .s_last(qkt_sl),
+        .c_valid(qkt_cv), .c_data(qkt_c));
+
     // ================= TIU: H2O importance =================
     localparam int NS = 8;
     reg tiu_av, tiu_lv, tiu_er; reg [2:0] tiu_as, tiu_ls; reg [7:0] tiu_aw, tiu_thr;
@@ -69,7 +84,7 @@ module tb_chip_cosim;
 
     // ---- shared scenario data ----
     reg [DW-1:0] Vin [0:255][0:127]; reg [31:0] Ghat [0:255][0:127];
-    integer Dn, Tn, Bn, fv, fg, code, t, d, k;
+    integer Dn, Tn, Bn, fv, fg, code, t, d, k, n;
     reg [DW-1:0] t16; reg [31:0] g32;
     reg [7:0] mass [0:NS-1];
     integer exp_evict, mn; reg exp_fp16; integer mx, sm, e0;
@@ -91,6 +106,15 @@ module tb_chip_cosim;
     reg  gate_peak, gate_unif;             // captured gate decisions (peaked / near-uniform)
     real gg, gmax16, rr16, adiff16, maxrel16;
 
+    // ---- Q·Kᵀ decode-scoring working state ----
+    localparam real QKT_TOL = 0.005;       // FP16 Q·Kᵀ score rel-err gate (rel_err < 5e-3)
+    reg  signed [7:0] Qi [0:DQK-1];        // INT8 query
+    reg  [15:0]  Kf [0:LQK*DQK-1];         // per-channel-dequantized fp16 keys (KVE key path)
+    reg  [15:0]  ksc;                      // per-channel fp16 key scale
+    integer sc_i8 [0:LQK-1];               // int8-quantized scores fed to the gate
+    real gmaxq, rrq, adq, maxrelq, smaxq, sscaleq;
+    integer iq;
+
     task step; begin @(negedge clk); end endtask
 
     initial begin
@@ -104,6 +128,7 @@ module tb_chip_cosim;
         end
         $fclose(fv); $fclose(fg);
         pv16_sv = 0; pv16_sl = 0; acu16_sv = 0; acu16_sl = 0;   // FP16-escape drives idle at reset
+        qkt_sv = 0; qkt_sl = 0;                                 // Q·Kᵀ scorer idle at reset
         rst_n = 0; repeat(4) step; rst_n = 1; step;
 
         // ========== BLOCK 2 (KVE): reconstruct each token's V̂, check bit-exact ==========
@@ -272,23 +297,71 @@ module tb_chip_cosim;
         $display("[TIU ] keep-tier (thr=%0d) + eviction victim: %s (evict slot %0d)",
                  tiu_thr, (errors==e0)?"match reference":"MISMATCH", tiu_es);
 
-        // ========== BLOCK 1 (ACU): gate one query's score row INT8/FP16 ==========
-        // peaky score row -> should route FP16 (max*N > 10*sum)
-        e0 = errors; mx = 0; sm = 0;
-        for (k=0;k<16;k=k+1) begin
-            step; acu_sv=1; acu_sl=(k==15); acu_s = (k==0) ? 8'sd100 : 8'sd2;  // one spike
-            if (((k==0)?100:2) > mx) mx = (k==0)?100:2; sm = sm + ((k==0)?100:2);
+        // ========== BLOCK 1 (MatE Q·Kᵀ scoring -> ACU gate) ==========
+        // The score row is now COMPUTED by the mate_qkt RTL from an INT8 query and the
+        // KVE's per-channel-dequantized fp16 keys (cq_dequant_f16 = round_fp16(code·
+        // scale)) — replacing the hard-coded stand-in — then quantized to int8 (per-tile
+        // symmetric, matching integration_example.quantize_int8) and gated by the
+        // precision controller. Keys are built peaked (key 0 aligned with Q) so one
+        // score dominates the row and the gate routes FP16 (as the original stand-in did).
+        e0 = errors;
+        for (d=0;d<DQK;d=d+1) Qi[d] = 8'sd100;                 // query: +100 on every channel
+        ksc = cq_fp_pkg::real_to_f16(0.02);                    // per-channel fp16 key scale
+        for (d=0;d<DQK;d=d+1) begin
+            Kf[0*DQK+d] = cq_fp_pkg::cq_dequant_f16(8'sd100, ksc);              // key 0: aligned/big
+            for (n=1;n<LQK;n=n+1)
+                Kf[n*DQK+d] = cq_fp_pkg::cq_dequant_f16($signed(1 + (n%3)), ksc); // others: small
         end
-        step; acu_sv=0;
-        k = 0; while (acu_dv !== 1'b1 && k < 8) begin step; k = k + 1; end  // wait for d_valid pulse
-        exp_fp16 = (mx*16 > 10*sm);
+        // stream the DQK head-dim channels through mate_qkt
+        for (d=0;d<DQK;d=d+1) begin
+            step;
+            qkt_sv=1; qkt_q=Qi[d]; qkt_sl=(d==DQK-1);
+            for (n=0;n<LQK;n=n+1) qkt_k[n*16 +: 16] = Kf[n*DQK+d];
+        end
+        step; qkt_sv=0; qkt_sl=0;
+        pd=0; while (qkt_cv !== 1'b1 && pd<8) begin step; pd=pd+1; end
+        if (qkt_cv !== 1'b1) begin errors=errors+1; $display("  Q·Kᵀ c_valid never pulsed"); end
+        else begin
+            // (a) check the mate_qkt scores vs the sequential-fp32 golden (rel_err<5e-3)
+            gmaxq = 1.0e-9;
+            for (n=0;n<LQK;n=n+1) begin
+                gg = 0.0;
+                for (d=0;d<DQK;d=d+1) gg = gg + $itor(Qi[d])*cq_fp_pkg::f16_to_real(Kf[n*DQK+d]);
+                rrq = (gg<0.0)?-gg:gg; if (rrq>gmaxq) gmaxq = rrq;
+            end
+            maxrelq = 0.0;
+            for (n=0;n<LQK;n=n+1) begin
+                gg = 0.0;
+                for (d=0;d<DQK;d=d+1) gg = gg + $itor(Qi[d])*cq_fp_pkg::f16_to_real(Kf[n*DQK+d]);
+                rrq = cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]);
+                adq = rrq - gg; if (adq<0.0) adq=-adq;
+                if (adq/gmaxq > maxrelq) maxrelq = adq/gmaxq;
+            end
+            if (maxrelq >= QKT_TOL) begin errors=errors+1; $display("  Q·Kᵀ scores OUT OF TOL: %f (tol %.3f)", maxrelq, QKT_TOL); end
+        end
+        // (b) quantize the fp16 scores to int8 (per-tile symmetric) and gate the tile
+        smaxq = 0.0;
+        for (n=0;n<LQK;n=n+1) begin rrq=cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]); if (rrq<0.0) rrq=-rrq; if (rrq>smaxq) smaxq=rrq; end
+        sscaleq = (smaxq>1.0e-9) ? (smaxq/127.0) : 1.0;
+        mx = 0; sm = 0;
+        for (n=0;n<LQK;n=n+1) begin
+            rrq = cq_fp_pkg::f16_to_real(qkt_c[n*16 +: 16]) / sscaleq;
+            iq = $rtoi(rrq + (rrq>=0.0?0.5:-0.5)); if (iq>127) iq=127; if (iq<-127) iq=-127;
+            sc_i8[n] = iq;
+            if ((iq<0?-iq:iq) > mx) mx = (iq<0?-iq:iq);
+            sm = sm + (iq<0?-iq:iq);
+        end
+        for (n=0;n<LQK;n=n+1) begin step; acu_sv=1; acu_sl=(n==LQK-1); acu_s = sc_i8[n][7:0]; end
+        step; acu_sv=0; acu_sl=0;
+        k = 0; while (acu_dv !== 1'b1 && k < 8) begin step; k = k + 1; end
+        exp_fp16 = (mx*4096 > 10*sm);   // RTL gate: max·N > 10·Σ, N = BLOCK_M*BLOCK_N = 4096
         if (acu_dv !== 1'b1) begin errors=errors+1; $display("  ACU d_valid never pulsed"); end
         else if (acu_fp16 !== exp_fp16) begin errors=errors+1; $display("  ACU fp16 got=%0b exp=%0b (max=%0d sum=%0d)", acu_fp16, exp_fp16, mx, sm); end
-        $display("[ACU ] precision gate on a peaky score row: %s (fp16=%0b)",
-                 (errors==e0)?"match reference":"MISMATCH", acu_fp16);
+        $display("[ACU ] Q·Kᵀ(mate_qkt) scores -> precision gate: scores rel-err %f (<%.3f), gate fp16=%0b: %s",
+                 maxrelq, QKT_TOL, acu_fp16, (errors==e0)?"match reference":"MISMATCH");
 
         $display("");
-        $display("CROSS-BLOCK COSIM (ACU + KVE + MatE P·V INT8+FP16 + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
+        $display("CROSS-BLOCK COSIM (MatE Q·Kᵀ + ACU gate + KVE + MatE P·V INT8+FP16 + TIU on one shared tile): %s", (errors==0)?"ALL BLOCKS PASS":"FAILED");
         $finish;
     end
 endmodule

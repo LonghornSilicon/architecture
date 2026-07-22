@@ -47,24 +47,41 @@ lambda/
 ├── arch.yml  docs/  paper/       # from `architecture`
 ├── rtl/
 │   ├── acu/                      # from attention-compute-unit (cleaned)
-│   │   ├── mate/                 #   mate_pv, mate_pv_fp16, mate_qkt (+ tb)
-│   │   ├── vecu/                 #   vecu_softmax (+ future rope, rmsnorm)
-│   │   ├── precision_controller/
+│   │   ├── mate/                 #   mate_pv, mate_pv_fp16, mate_qkt (+ tb/ docs/ research/)
+│   │   ├── vecu/                 #   vecu_softmax (+ future rope, rmsnorm) (+ tb/ docs/ research/)
+│   │   ├── precision_controller/ #   (+ tb/ docs/ research/)
 │   │   └── README.md
-│   ├── kve/                      # from kv-cache-engine
-│   ├── tiu/                      # from token-importance-unit
+│   ├── kve/                      # from kv-cache-engine (+ docs/ research/)
+│   ├── tiu/                      # from token-importance-unit (+ docs/ research/)
 │   └── lambda_acu_top/           # integration top + decode FSM (Phase 3)
 ├── sw/reference_model/           # golden models (merged from each repo's sw/)
 ├── verif/cosim/                  # tb_chip_cosim (from architecture)
-├── pdk/
+├── pdk/                          # each PDK its own folder; references rtl/ by path — NO copies
 │   ├── sky130/                   # per-block OpenLane configs + results
-│   └── gf180/                    # from chipathon-lambda-acu (LibreLane + padring + SPI)
-├── research/                     # the archived APA RL project (or its own repo)
+│   ├── gf180/                    # from chipathon-lambda-acu (LibreLane + padring + SPI)
+│   └── asap7/                    # ORFS predictive-7nm bracket (research)
+├── research/                     # top-level: the APA RL project + chip-wide research
 └── .github/workflows/            # CI + mirror-blocks.yml
+
+# Every block dir (rtl/acu/mate, rtl/kve, …) carries its own README + docs/ + research/, so each
+# mirror repo is self-describing and ships its design rationale as LLM/agent context (per decision #2).
 ```
 
-Mirror map: `rtl/acu → lambda-acu`, `rtl/kve → lambda-kve`, `rtl/tiu → lambda-tiu` (extend as
-MSC/LSU/HIF land).
+**Mirror map** (per functional block — every block, incl. TIU; extend the row list as new blocks land):
+
+| monorepo path | mirror repo |
+|---|---|
+| `rtl/acu/mate` | `lambda-mate` |
+| `rtl/acu/vecu` | `lambda-vecu` |
+| `rtl/acu/precision_controller` | `lambda-precision-controller` |
+| `rtl/kve` | `lambda-kve` |
+| `rtl/tiu` | `lambda-tiu` |
+| *(future)* `rtl/msc`, `rtl/lsu`, `rtl/hif` | `lambda-msc`, … |
+
+**Copy-drift elimination (a real benefit, not just tidiness):** the `chipathon-lambda-acu` repo today
+holds **hand-synced `.sv` copies** of every block (tracked in `PROVENANCE.md`) — they can silently
+drift from the source repos. In the monorepo there is **one** copy of each block; `pdk/gf180/` and
+`pdk/sky130/` reference it by path. The drift hazard goes away entirely.
 
 ## Migration — least-friction, history-preserving
 
@@ -91,22 +108,26 @@ into its monorepo path using `git subtree add` or (cleaner) `git filter-repo --t
 
 ## Decisions — CONFIRMED 2026-07-22
 
-1. **Monorepo home:** a **fresh repo** (not a rebrand of `architecture`). Name **`lambda`**
-   (pending final word from Chaithu) — chosen for family symmetry with the mirror repos
-   `lambda-acu` / `lambda-kve` / `lambda-tiu`. Alternatives floated: `lambda-soc`, `lambda-silicon`.
-2. **Research:** do **NOT** archive and do **NOT** use a branch (a branch hides/rots separate work).
-   Give it **its own repo** — the existing `attention-compute-unit` repo *is* the old APA RL project,
-   so we **extract the hardware out into `lambda`** and let that repo **revert to a research repo**
-   (rename toward `adaptive-precision-attention`). It stays live/browsable for future research.
+1. **Monorepo home:** a **fresh repo named `lambda`** (final). Family symmetry with the per-block
+   mirror repos (`lambda-mate`, `lambda-vecu`, `lambda-kve`, `lambda-tiu`, …).
+2. **Research:** keep it **as a `research/` subdir** (NOT archived, NOT a branch, NOT its own repo).
+   Two levels: a top-level `research/` in `lambda` (the APA RL project + chip-wide research), AND a
+   **`research/` subdir inside each block dir**. Rationale (Chaithu): the per-block `research/` is
+   **context for future LLM/agents** — design rationale, dead ends, benchmarks, exploration notes —
+   so that anyone (human or agent) starting new work on that block, or a new related project, inherits
+   the "why," not just the RTL. It rides along in the block's mirror repo, so the context is wherever
+   the block is.
 3. **`rtl` layout:** **subdirs for multi-block units, flat for single blocks.** `rtl/acu/` gets
    `mate/` + `vecu/` + `precision_controller/`; `rtl/kve/` and `rtl/tiu/` stay flat (one block each,
    even if many files). A unit gains subdirs only if it later holds multiple distinct blocks.
 4. **RTL/PDK split:** **directory-based, both on `main`** — `rtl/` and `pdk/` are *folders*, not
-   branches (the current `rtl`-vs-`main` branch split was a per-repo workaround; folders supersede it).
-   `pdk/` splits per target: `pdk/sky130/`, `pdk/gf180/`.
-
-Still open: final repo name; whether the research repo keeps `attention-compute-unit` as its name or
-is renamed.
+   branches. `pdk/` splits **per target, each its own folder** — `pdk/sky130/`, `pdk/gf180/`,
+   `pdk/asap7/` (we test on multiple PDKs, so each is a sibling folder).
+5. **Mirror policy:** **every functional block gets its own mirror repo** — and every *new* block we
+   make adds a mirror row. Granularity = the architecture's functional blocks (MatE, VecU, KVE, TIU,
+   precision-controller, + future MSC/LSU/HIF), matching how we name blocks — not the flat leaf tiles
+   (`mate_pv` etc. live *inside* `lambda-mate`). Each block dir carries its `research/` + `docs/` so
+   the mirror is self-describing.
 
 ## Risks / notes
 

@@ -31,8 +31,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - prefix: rtl/acu       # MatE + VecU + precision_controller
-            repo: LonghornSilicon/lambda-acu
+          # One mirror per functional block. EVERY new block adds a row here.
+          - prefix: rtl/acu/mate
+            repo: LonghornSilicon/lambda-mate
+          - prefix: rtl/acu/vecu
+            repo: LonghornSilicon/lambda-vecu
+          - prefix: rtl/acu/precision_controller
+            repo: LonghornSilicon/lambda-precision-controller
           - prefix: rtl/kve
             repo: LonghornSilicon/lambda-kve
           - prefix: rtl/tiu

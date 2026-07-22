@@ -104,6 +104,27 @@ holds **hand-synced `.sv` copies** of every block (tracked in `PROVENANCE.md`) �
 drift from the source repos. In the monorepo there is **one** copy of each block; `pdk/gf180/` and
 `pdk/sky130/` reference it by path. The drift hazard goes away entirely.
 
+## Agent context & lab-notebook layer (decision #6, 2026-07-22)
+
+Goal: stop agents/people re-running experiments, re-building blocks, and re-hitting the same walls.
+`research/` + lab-notebook are the foundation but don't produce a high-signal "don't repeat" surface
+on their own. Add a **thin, always-read layer** (NOT a parallel system — sprawl rots):
+
+- **`AGENTS.md`** (root + per block; template: `docs/prototypes/AGENTS.md`) — the front door every
+  human/agent reads first: routes to `research/`/`DECISIONS.md`/gotchas, gives the exact runbook,
+  and states the lab-notebook rules. Mirror to `CLAUDE.md` for Claude Code.
+- **`DECISIONS.md`** (per block + chip-wide, append-only) — settled calls + why + date, so they
+  aren't re-litigated. **Seeded** from this session: `docs/prototypes/DECISIONS.seed.md`.
+- **`## Known gotchas`** section in each block README — pitfalls that cost time (seeded above).
+- **Experiment ledger** in `research/` (or `CLAIMS.md`-style) — result · n · artifact · script, so
+  measurements aren't re-run. ChannelQuant's `CLAIMS.md` is the precedent.
+
+Three genres, three kinds of repeated work prevented: **decision log** (re-litigation), **gotchas**
+(re-hitting walls), **experiment ledger** (re-running). Lab-notebook is the *discipline* that keeps
+all three current; `AGENTS.md` is the *door* that makes them discoverable; formalize the rule in
+`docs/documentation_standard.md` and back it with a light CI check (PR touching `rtl/` must touch
+`docs/`/`DECISIONS.md`).
+
 ## Migration — least-friction, history-preserving
 
 **Principle:** never copy-paste files (loses history + blame). Import each repo *with history*

@@ -41,43 +41,58 @@ waits on that agent.
 
 ## Target monorepo layout (`lambda`)
 
+**BLOCK-MAJOR** — each block is a self-contained top-level folder holding *all* its aspects
+(python sw, rtl, pdk, docs, research). This is the OpenTitan pattern (`hw/ip/<block>/{rtl,dv,doc}`),
+and it makes each block's mirror a *complete* repo. A `chip/` folder holds the cross-block work that
+belongs to no single block.
+
 ```
 lambda/
-├── README.md                     # chip overview + links to each block
-├── arch.yml  docs/  paper/       # from `architecture`
-├── rtl/
-│   ├── acu/                      # from attention-compute-unit (cleaned)
-│   │   ├── mate/                 #   mate_pv, mate_pv_fp16, mate_qkt (+ tb/ docs/ research/)
-│   │   ├── vecu/                 #   vecu_softmax (+ future rope, rmsnorm) (+ tb/ docs/ research/)
-│   │   ├── precision_controller/ #   (+ tb/ docs/ research/)
-│   │   └── README.md
-│   ├── kve/                      # from kv-cache-engine (+ docs/ research/)
-│   ├── tiu/                      # from token-importance-unit (+ docs/ research/)
-│   └── lambda_acu_top/           # integration top + decode FSM (Phase 3)
-├── sw/reference_model/           # golden models (merged from each repo's sw/)
-├── verif/cosim/                  # tb_chip_cosim (from architecture)
-├── pdk/                          # each PDK its own folder; references rtl/ by path — NO copies
-│   ├── sky130/                   # per-block OpenLane configs + results
-│   ├── gf180/                    # from chipathon-lambda-acu (LibreLane + padring + SPI)
-│   └── asap7/                    # ORFS predictive-7nm bracket (research)
-├── research/                     # top-level: the APA RL project + chip-wide research
+├── kve/                          # ← kv-cache-engine, wholesale (one self-contained block)
+│   ├── sw/                       #   Python reference / golden models
+│   ├── rtl/                      #   SystemVerilog + tb
+│   ├── pdk/{sky130,gf180}/       #   hardening configs + results for THIS block
+│   ├── docs/
+│   └── research/                 #   design notes / dead ends / benchmarks (LLM/agent context)
+├── tiu/                          # ← token-importance-unit, wholesale
+│   └── sw/ rtl/ pdk/ docs/ research/
+├── acu/                          # multi-block unit → sub-block folders (each self-contained)
+│   ├── mate/                     #   sw/ rtl/ pdk/ docs/ research/   (mate_pv, _fp16, _qkt)
+│   ├── vecu/                     #   sw/ rtl/ pdk/ docs/ research/   (vecu_softmax, +rope/rmsnorm)
+│   ├── precision_controller/     #   sw/ rtl/ pdk/ docs/ research/
+│   ├── docs/  research/          #   ACU-level
+│   └── README.md
+├── chip/                         # cross-block integration — belongs to NO single block
+│   ├── rtl/                      #   lambda_acu top, chip_core, spi_loader
+│   ├── verif/                    #   tb_chip_cosim (the cross-block cosim)
+│   ├── pdk/gf180/                #   padring assembly + full-chip floorplan + submit package
+│   └── docs/
+├── docs/                         # chip-wide: arch.yml, papers, the audit + these plans
+├── research/                     # chip-wide research (the APA RL project)
+├── README.md
 └── .github/workflows/            # CI + mirror-blocks.yml
-
-# Every block dir (rtl/acu/mate, rtl/kve, …) carries its own README + docs/ + research/, so each
-# mirror repo is self-describing and ships its design rationale as LLM/agent context (per decision #2).
 ```
+
+Why block-major here (vs aspect-major `rtl/ pdk/ sw/`): (1) **mirrors become complete blocks** —
+`kve/ → lambda-kve` ships rtl + python + pdk + docs + research together, exactly the "open it and
+see it" + LLM-context goal; (2) **migration is trivial** — each current repo already *is* a block
+folder (`sw/ rtl/ docs/`), so it drops in wholesale; (3) it's the proven chip-repo pattern.
 
 **Mirror map** (per functional block — every block, incl. TIU; extend the row list as new blocks land):
 
 | monorepo path | mirror repo | level |
 |---|---|---|
-| `rtl/acu` | `lambda-acu` | **umbrella** — the assembled ACU (mate + vecu + pc + top) |
-| `rtl/acu/mate` | `lambda-mate` | piece |
-| `rtl/acu/vecu` | `lambda-vecu` | piece |
-| `rtl/acu/precision_controller` | `lambda-precision-controller` | piece |
-| `rtl/kve` | `lambda-kve` | block |
-| `rtl/tiu` | `lambda-tiu` | block |
-| *(future)* `rtl/msc`, `rtl/lsu`, `rtl/hif` | `lambda-msc`, … | block |
+| `acu` | `lambda-acu` | **umbrella** — assembled ACU (mate + vecu + pc) |
+| `acu/mate` | `lambda-mate` | piece (complete: sw+rtl+pdk+docs+research) |
+| `acu/vecu` | `lambda-vecu` | piece |
+| `acu/precision_controller` | `lambda-precision-controller` | piece |
+| `kve` | `lambda-kve` | block (complete) |
+| `tiu` | `lambda-tiu` | block (complete) |
+| `chip` | `lambda-chip` | integration (optional) |
+| *(future)* `msc`, `lsu`, `hif` | `lambda-msc`, … | block |
+
+Because it's block-major, each mirror carries the block's **whole** story (python + rtl + pdk +
+docs + research), not just its RTL.
 
 **Nested mirrors are fine and drift-free.** `subtree split` is per-prefix, so `lambda-acu` (the
 whole `rtl/acu/`) and `lambda-mate` (`rtl/acu/mate/`) are both read-only projections of the *same*
@@ -126,9 +141,13 @@ into its monorepo path using `git subtree add` or (cleaner) `git filter-repo --t
 3. **`rtl` layout:** **subdirs for multi-block units, flat for single blocks.** `rtl/acu/` gets
    `mate/` + `vecu/` + `precision_controller/`; `rtl/kve/` and `rtl/tiu/` stay flat (one block each,
    even if many files). A unit gains subdirs only if it later holds multiple distinct blocks.
-4. **RTL/PDK split:** **directory-based, both on `main`** — `rtl/` and `pdk/` are *folders*, not
-   branches. `pdk/` splits **per target, each its own folder** — `pdk/sky130/`, `pdk/gf180/`,
-   `pdk/asap7/` (we test on multiple PDKs, so each is a sibling folder).
+4. **Structure = BLOCK-MAJOR** (revised 2026-07-22 per Chaithu): each block is a self-contained
+   top-level folder holding all its aspects — `<block>/{sw, rtl, pdk, docs, research}` — *not* an
+   aspect-major `rtl/ pdk/ sw/` top level. Within a block, `pdk/` splits per target
+   (`pdk/sky130/`, `pdk/gf180/`, `pdk/asap7/` — we test on multiple PDKs, each its own folder).
+   Cross-block work (the integration top, the cosim, the full-chip padring) lives in a top-level
+   `chip/` folder. All on `main` (directories, not branches). This makes each block's mirror a
+   *complete* repo and matches how the current repos are already laid out (near-zero-friction move).
 5. **Mirror policy:** **every functional block gets its own mirror repo** — and every *new* block we
    make adds a mirror row. Granularity = the architecture's functional blocks (MatE, VecU, KVE, TIU,
    precision-controller, + future MSC/LSU/HIF), matching how we name blocks — not the flat leaf tiles

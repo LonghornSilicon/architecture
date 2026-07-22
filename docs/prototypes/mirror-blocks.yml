@@ -33,21 +33,22 @@ jobs:
         include:
           # Mirrors can NEST — subtree-split is per-prefix, so an umbrella and its pieces
           # coexist as read-only views of the SAME source tree (no drift).
-          # Umbrella: the whole assembled ACU (contains mate/ vecu/ precision_controller/ + top).
-          - prefix: rtl/acu
+          # Block-major paths: each mirror = a complete block (sw + rtl + pdk + docs + research).
+          # Umbrella: the whole assembled ACU (contains mate/ vecu/ precision_controller/).
+          - prefix: acu
             repo: LonghornSilicon/lambda-acu
           # Pieces: one mirror per functional block. EVERY new block adds a row here.
-          - prefix: rtl/acu/mate
+          - prefix: acu/mate
             repo: LonghornSilicon/lambda-mate
-          - prefix: rtl/acu/vecu
+          - prefix: acu/vecu
             repo: LonghornSilicon/lambda-vecu
-          - prefix: rtl/acu/precision_controller
+          - prefix: acu/precision_controller
             repo: LonghornSilicon/lambda-precision-controller
-          - prefix: rtl/kve
+          - prefix: kve
             repo: LonghornSilicon/lambda-kve
-          - prefix: rtl/tiu
+          - prefix: tiu
             repo: LonghornSilicon/lambda-tiu
-          # add rows as blocks land: rtl/msc, rtl/lsu, rtl/hif, ...
+          # add rows as blocks land: msc, lsu, hif, ...
     steps:
       - uses: actions/checkout@v4
         with:

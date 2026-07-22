@@ -89,17 +89,24 @@ into its monorepo path using `git subtree add` or (cleaner) `git filter-repo --t
    OR let the mirrors *become* them (point people at the read-only mirrors). Keep the git history —
    don't delete.
 
-## Decisions to confirm before executing
+## Decisions — CONFIRMED 2026-07-22
 
-- **Monorepo home:** rename/rebrand `architecture` → `lambda`, or a fresh `lambda` repo? (Reusing
-  `architecture` keeps its history + doc-hub role; a fresh repo is a clean slate.)
-- **Research split:** archive the APA RL project into `research/` *inside* the monorepo, or give it
-  its own standalone `adaptive-precision-attention` repo (it's a real publication — arguably wants
-  its own front door too)?
-- **`rtl/acu` hierarchy:** subdirs (`mate/`, `vecu/`) as above, or flat like KVE? (Subdirs read
-  better for a multi-block unit; flat matches KVE's precedent.)
-- **RTL/PDK split:** today it's branch-based (`rtl` vs `main`) + a separate PDK repo. In the
-  monorepo it becomes directory-based (`rtl/` + `pdk/`) on one branch. Confirm that's the intent.
+1. **Monorepo home:** a **fresh repo** (not a rebrand of `architecture`). Name **`lambda`**
+   (pending final word from Chaithu) — chosen for family symmetry with the mirror repos
+   `lambda-acu` / `lambda-kve` / `lambda-tiu`. Alternatives floated: `lambda-soc`, `lambda-silicon`.
+2. **Research:** do **NOT** archive and do **NOT** use a branch (a branch hides/rots separate work).
+   Give it **its own repo** — the existing `attention-compute-unit` repo *is* the old APA RL project,
+   so we **extract the hardware out into `lambda`** and let that repo **revert to a research repo**
+   (rename toward `adaptive-precision-attention`). It stays live/browsable for future research.
+3. **`rtl` layout:** **subdirs for multi-block units, flat for single blocks.** `rtl/acu/` gets
+   `mate/` + `vecu/` + `precision_controller/`; `rtl/kve/` and `rtl/tiu/` stay flat (one block each,
+   even if many files). A unit gains subdirs only if it later holds multiple distinct blocks.
+4. **RTL/PDK split:** **directory-based, both on `main`** — `rtl/` and `pdk/` are *folders*, not
+   branches (the current `rtl`-vs-`main` branch split was a per-repo workaround; folders supersede it).
+   `pdk/` splits per target: `pdk/sky130/`, `pdk/gf180/`.
+
+Still open: final repo name; whether the research repo keeps `attention-compute-unit` as its name or
+is renamed.
 
 ## Risks / notes
 

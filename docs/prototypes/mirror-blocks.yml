@@ -31,7 +31,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # One mirror per functional block. EVERY new block adds a row here.
+          # Mirrors can NEST — subtree-split is per-prefix, so an umbrella and its pieces
+          # coexist as read-only views of the SAME source tree (no drift).
+          # Umbrella: the whole assembled ACU (contains mate/ vecu/ precision_controller/ + top).
+          - prefix: rtl/acu
+            repo: LonghornSilicon/lambda-acu
+          # Pieces: one mirror per functional block. EVERY new block adds a row here.
           - prefix: rtl/acu/mate
             repo: LonghornSilicon/lambda-mate
           - prefix: rtl/acu/vecu

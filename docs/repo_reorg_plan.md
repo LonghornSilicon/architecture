@@ -69,14 +69,20 @@ lambda/
 
 **Mirror map** (per functional block — every block, incl. TIU; extend the row list as new blocks land):
 
-| monorepo path | mirror repo |
-|---|---|
-| `rtl/acu/mate` | `lambda-mate` |
-| `rtl/acu/vecu` | `lambda-vecu` |
-| `rtl/acu/precision_controller` | `lambda-precision-controller` |
-| `rtl/kve` | `lambda-kve` |
-| `rtl/tiu` | `lambda-tiu` |
-| *(future)* `rtl/msc`, `rtl/lsu`, `rtl/hif` | `lambda-msc`, … |
+| monorepo path | mirror repo | level |
+|---|---|---|
+| `rtl/acu` | `lambda-acu` | **umbrella** — the assembled ACU (mate + vecu + pc + top) |
+| `rtl/acu/mate` | `lambda-mate` | piece |
+| `rtl/acu/vecu` | `lambda-vecu` | piece |
+| `rtl/acu/precision_controller` | `lambda-precision-controller` | piece |
+| `rtl/kve` | `lambda-kve` | block |
+| `rtl/tiu` | `lambda-tiu` | block |
+| *(future)* `rtl/msc`, `rtl/lsu`, `rtl/hif` | `lambda-msc`, … | block |
+
+**Nested mirrors are fine and drift-free.** `subtree split` is per-prefix, so `lambda-acu` (the
+whole `rtl/acu/`) and `lambda-mate` (`rtl/acu/mate/`) are both read-only projections of the *same*
+source tree. MatE's files appearing in both is not drift — it's one authoritative copy seen through
+two windows. The umbrella "shows the assembled ACU"; the pieces show focused blocks.
 
 **Copy-drift elimination (a real benefit, not just tidiness):** the `chipathon-lambda-acu` repo today
 holds **hand-synced `.sv` copies** of every block (tracked in `PROVENANCE.md`) — they can silently

@@ -19,7 +19,7 @@ attention datapath across PDKs. Update it as holes close — do not let it go st
 | `token_importance_unit` | ✅ | ✅ (multi-corner) | ✅ | — | ✅ RTL + GF180 GLS |
 | `mate_qkt` (Q·Kᵀ) | ✅ | ❌ **none** (Yosys smoke only) | ✅ | — | ✅ RTL + GF180 GLS |
 | `vecu_softmax` | ✅ | ❌ **none** | ✅ (ss fixed) | — | ✅ RTL + GF180 GLS |
-| `kv_cache_engine` (KVE) | ✅ | ✅ **signed off** 9-corner (5/6 clean; ss-corner reset-tree cap/slew tracked) — 0.236 mm², ~24 MHz ss; `SRAM_DEPTH=2` flop proxy [branch `sky130-kve-signoff` `440c7b5`, pending merge] | ⚠️→✅ real `gf180mcu_fd_ip_sram` integrated; bit-exact round-trip + full GLS e2e pass; **PDN via DRC/LVS open** | — | ✅ RTL; GLS via combinational reconstruct |
+| `kv_cache_engine` (KVE) | ✅ | ✅ **signed off** 9-corner (5/6 clean; ss-corner reset-tree cap/slew tracked) — 0.236 mm², ~24 MHz ss; `SRAM_DEPTH=2` flop proxy [merged to `rtl` `d4143c1`] | ⚠️→✅ real `gf180mcu_fd_ip_sram` integrated; bit-exact round-trip + full GLS e2e pass; **PDN via DRC/LVS open** | — | ✅ RTL; GLS via combinational reconstruct |
 | RoPE | ❌ **no RTL** | — | — | — | reference stand-in (pre-RoPE'd tiles) |
 | RMSNorm | ❌ **no RTL** | — | — | — | reference stand-in |
 | `lambda_acu` top + decode FSM | ❌ **stub only** | — | — | — | testbench-stitched; no integrated top |

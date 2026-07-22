@@ -19,7 +19,7 @@ attention datapath across PDKs. Update it as holes close — do not let it go st
 | `token_importance_unit` | ✅ | ✅ (multi-corner) | ✅ | — | ✅ RTL + GF180 GLS |
 | `mate_qkt` (Q·Kᵀ) | ✅ | ❌ **none** (Yosys smoke only) | ✅ | — | ✅ RTL + GF180 GLS |
 | `vecu_softmax` | ✅ | ❌ **none** | ✅ (ss fixed) | — | ✅ RTL + GF180 GLS |
-| `kv_cache_engine` (KVE) | ✅ | ✅ **signed off** 9-corner (5/6 clean; ss-corner reset-tree cap/slew tracked) — 0.236 mm², ~24 MHz ss; `SRAM_DEPTH=2` flop proxy [merged to `rtl` `d4143c1`] | ⚠️→✅ real `gf180mcu_fd_ip_sram` integrated; bit-exact round-trip + full GLS e2e pass; **PDN via DRC/LVS open** | — | ✅ RTL; GLS via combinational reconstruct |
+| `kv_cache_engine` (KVE) | ✅ | ✅ **signed off** 9-corner (5/6 clean; ss-corner reset-tree cap/slew tracked) — 0.236 mm², ~24 MHz ss; `SRAM_DEPTH=2` flop proxy [merged to `rtl` `d4143c1`] | ✅ real `gf180mcu_fd_ip_sram` (4 macros); **DRC 0 / LVS 0**, setup +17.5/hold +6.9; bit-exact round-trip + full GLS e2e pass | — | ✅ RTL; GLS via combinational reconstruct |
 | RoPE | ❌ **no RTL** | — | — | — | reference stand-in (pre-RoPE'd tiles) |
 | RMSNorm | ❌ **no RTL** | — | — | — | reference stand-in |
 | `lambda_acu` top + decode FSM | ❌ **stub only** | — | — | — | testbench-stitched; no integrated top |
@@ -48,15 +48,16 @@ The flagship is currently **less complete than GF180** for the datapath, because
 
 ## 🟠 GF180 (shuttle) holes
 
-1. **KVE `gf180mcu_fd_ip_sram` macro** — **mostly resolved 2026-07-21.** Storage extracted into a
-   PDK-agnostic `kv_sram` module (kve `rtl` `f6ed2db`, pushed; sim_top/sim/realdata all pass); the
-   GF180 wrapper tiles the real `gf180mcu_fd_ip_sram__sram512x8m8wm1` (chipathon `rtl` `c0216ff`).
-   **Verified (independently re-run):** KV store round-trips through the real SRAM macro model
-   **bit-exact** (80b×512), and the full compute-datapath GLS e2e still **ALL PASS**. Physical:
-   4 macros placed, **setup/hold/routing-DRC/antenna/PSM-power/macro-LVS all pass**. **Still open:**
-   **Magic-DRC (7026) + Netgen-LVS (6)** on the macro **PDN via geometry** (Metal2 VDD/Metal1 VSS
-   pins → Metal4 straps; electrically valid per PSM, but via geometry violates gf180 Via1/Via2
-   rules) → needs a refined per-macro power ring / via arrays (the fiddly hard-macro PDN step).
+1. ~~**KVE `gf180mcu_fd_ip_sram` macro**~~ — **RESOLVED 2026-07-22 (chipathon `rtl` `5514cb0`).**
+   KV storage backed by 4 real `gf180mcu_fd_ip_sram__sram512x8m8wm1` macros (32b×512, die 1.27 mm²)
+   via a PDK-agnostic `kv_sram` interface (kve `rtl` `f6ed2db`). **Fully clean GF180 sign-off:
+   Magic-DRC 0, Netgen-LVS 0, setup +17.5 ns, hold +6.9 ns, antenna 0.** The PDN close: connect the
+   SRAM's **Metal3** power pins to the Metal4 straps with a legal **Via3** (the old Metal1/Metal2
+   route forced illegal Via1/Via2 stacks) → DRC 7026→8, LVS 6→0; then a documented **DRC-view-only
+   maglef** widening one sub-min-width pin in the *vendor SRAM abstract* (0.11 µm vs 0.28 µm — an
+   abstract artifact; the vendor's real GDS is DRC-clean and LVS ran on the real device = 0) → DRC 8→0.
+   **Independently re-verified:** bit-exact SRAM round-trip + full GLS e2e **ALL PASS**. Residual
+   ss-corner slew/cap (54/12) on mux/control logic tracked separately (DRC/LVS-independent).
 2. **`vecu_softmax` area** — the ss-close resize ~2×'d cells (→1.49 mm²). **RTL rebalanced 2026-07-21**
    (`attention-compute-unit` `rtl` `2c458aa`, architecture `rtl` `d837b42`): converted to a
    multi-cycle datapath (one fp32 op/cycle, longest path ~one fp32 op vs two → closes ss at a

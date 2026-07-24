@@ -97,8 +97,10 @@ fi
 mkdir -p "$rundir" 2>/dev/null || { echo "ERROR: cannot create $rundir" >&2; exit 1; }
 cd "$rundir"
 
+# v0.4.2 (M5): run-id regex allows the -N collision suffix minted by
+# lambda_rundir when two batch launches share a second.
 rd_base="$(basename "$rundir")"
-if [[ "$rd_base" == "interactive" || "$rd_base" =~ ^[0-9]{8}-[0-9]{6}$ ]]; then
+if [[ "$rd_base" == "interactive" || "$rd_base" =~ ^[0-9]{8}-[0-9]{6}(-[0-9]+)?$ ]]; then
     tag_name="$(basename "$(dirname "$(dirname "$rundir")")")"   # <block>
 else
     tag_name="$rd_base"
@@ -114,6 +116,7 @@ echo "  mode:    $mode"
 echo "  run dir: $rundir"
 [[ -n "$flow" ]] && echo "  flow:    $flow"
 echo "  log:     $log_file"
+[[ "$mode" == "batch" ]] && echo "  tool log: $rundir/genus.${timestamp}.log (+ .cmd)"
 echo ""
 
 # ---- Launch (foreground; inherits the terminal) ----------------------------
@@ -128,6 +131,13 @@ case "$mode" in
         # GENUS_BATCH lets the flow detect headless mode in pure Tcl without
         # relying on a Cadence command name (mirrors INNOVUS_BATCH).
         export GENUS_BATCH=1
-        exec genus -no_gui -files "$flow" -log "$log_file"
+        # v0.4.2 (M6): batch points the Cadence-native -log INTO the run dir
+        # (genus.<ts>.log/.cmd colocated with outputs/ — "cd into the run dir
+        # = everything"), while the console transcript is still tee'd to the
+        # flat $LAMBDA_LOGS list. GUI/shell keep -log in $LAMBDA_LOGS (their
+        # interactive/ dir is shared, so per-run colocation buys nothing).
+        # Process substitution (not `| tee`) so exec really replaces the shell
+        # and Ctrl-C reaches genus — same rationale as xrun-here.
+        exec genus -no_gui -files "$flow" -log "$rundir/genus.${timestamp}" > >(tee "$log_file") 2>&1
         ;;
 esac

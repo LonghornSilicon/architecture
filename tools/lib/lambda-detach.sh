@@ -12,7 +12,7 @@
 #     gui_detach <tag> <tool> [args...]
 #
 # Example:
-#     gui_detach stratus.mate.gui stratus_ide -prj project.tcl
+#     gui_detach stratus.mate.gui stratus_ide -project project.tcl
 #
 # Side effects:
 #   - Writes "$LAMBDA_LOGS/<tag>.<UTC-timestamp>.log"
@@ -62,13 +62,19 @@ gui_detach() {
 
     # nohup + redirect: stdin from /dev/null avoids tty-output suspension,
     # &> sends both stdout and stderr to the log, & backgrounds the process.
-    nohup "$tool" "$@" </dev/null &>"$log_file" &
+    # ${1+"$@"} (v0.4.2, M2): a no-args `gui_detach <tag> <tool>` under bash
+    # 4.2 `set -u` would crash on the empty "$@" expansion; the idiom is safe.
+    nohup "$tool" ${1+"$@"} </dev/null &>"$log_file" &
     local pid=$!
 
     echo "$pid" > "$pid_file"
 
+    # ${1+$*} (v0.4.2, M2): "$*" suffers the same bash-4.2 set -u empty-args
+    # abort as "$@" — and crashing HERE would kill the caller AFTER the tool
+    # was already forked (orphaned GUI, no PID echoed). No quotes inside the
+    # heredoc: they'd be literal characters there.
     cat <<EOF
-Launched: $tool $*
+Launched: $tool ${1+$*}
   PID:    $pid
   log:    $log_file
   pidfile:$pid_file

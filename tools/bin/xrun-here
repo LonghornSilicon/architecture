@@ -96,8 +96,10 @@ fi
 mkdir -p "$rundir" 2>/dev/null || { echo "ERROR: cannot create $rundir" >&2; exit 1; }
 cd "$rundir"
 
+# v0.4.2 (M5): run-id regex allows the -N collision suffix minted by
+# lambda_rundir when two batch launches share a second.
 rd_base="$(basename "$rundir")"
-if [[ "$rd_base" == "interactive" || "$rd_base" =~ ^[0-9]{8}-[0-9]{6}$ ]]; then
+if [[ "$rd_base" == "interactive" || "$rd_base" =~ ^[0-9]{8}-[0-9]{6}(-[0-9]+)?$ ]]; then
     tag_name="$(basename "$(dirname "$(dirname "$rundir")")")"
 else
     tag_name="$rd_base"
@@ -118,12 +120,17 @@ echo ""
 # parent shell still waits for `tee`, defeating the point and breaking signal
 # forwarding to xrun. Use process substitution so the shell IS replaced and
 # Ctrl-C goes straight to xrun. Process substitution preserves logging.
+#
+# ${1+"$@"} (v0.4.2, M2): on the chamber's bash 4.2.46, `set -u` + an EMPTY
+# "$@" expansion aborts with "unbound variable" (fixed upstream in bash 4.4).
+# The classic ${1+"$@"} idiom expands to nothing when there are no args and
+# to "$@" otherwise — safe on every bash.
 case "$mode" in
     sim)
-        exec xrun "$@" > >(tee "$log_file") 2>&1
+        exec xrun ${1+"$@"} > >(tee "$log_file") 2>&1
         ;;
     gui)
-        exec xrun -gui "$@" > >(tee "$log_file") 2>&1
+        exec xrun -gui ${1+"$@"} > >(tee "$log_file") 2>&1
         ;;
     batch)
         exec xrun -f "$args_file" > >(tee "$log_file") 2>&1

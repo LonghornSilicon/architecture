@@ -18,7 +18,8 @@ bash ~/architecture/tools/install.sh               # symlinks tools/bin/* into ~
                                                    # + provisions ~/work/lambda/{logs,inputs}
                                                    # + writes stub ~/work/lambda/Makefile
 
-# Daily use — ALWAYS on a compute node (login node lacks the autofs-mounted tools)
+# Daily use — ALWAYS on a compute node (login CAN automount the tools too, but
+# it is sized for interactive Virtuoso/vManager — run real work on compute)
 qsh -q normal.q -now n -V                          # get a compute shell with X11
 
 cd ~/work/lambda                                   # operate from the run area, NOT the repo
@@ -50,7 +51,7 @@ lambda-xcelium  mate sim <args>  /  lambda-verisium mate
 chamber-diagnose                                   # raw chamber probe
 ```
 
-That's the whole interface. Everything below is justification, mental models, and extrapolation paths. **Two facts to internalize first** — see "Chamber execution model" below: tools live on COMPUTE nodes only, `/apps` is AUTOFS.
+That's the whole interface. Everything below is justification, mental models, and extrapolation paths. **Two facts to internalize first** — see "Chamber execution model" below: run real work on COMPUTE nodes (login can automount the tools, but isn't sized for them), and `/apps` is AUTOFS.
 
 ---
 
@@ -153,7 +154,7 @@ The repo, the run area, and the release artifacts each live in a different place
     │   ├── <run-id>/                   batch run (UTC YYYYMMDD-HHMMSS)
     │   │   ├── outputs/<b>.mapped.v
     │   │   ├── reports/{timing,area,power}.rpt
-    │   │   ├── genus.log, genus.cmd
+    │   │   ├── genus.<ts>.log, genus.<ts>.cmd   (batch -log → run dir; v0.4.2)
     │   │   └── STATUS                  PASS|FAIL + UTC + rc  (v0.4.1)
     │   └── latest -> <run-id>          symlink to newest
     ├── xcelium/
@@ -177,7 +178,7 @@ The repo, the run area, and the release artifacts each live in a different place
         └── MANIFEST                    UTC, tool, run-id, git sha per artifact
 ```
 
-**run-id** = UTC `YYYYMMDD-HHMMSS`; the `latest` symlink in each tool dir points at the newest batch. **GUI/shell** sessions use a stable `interactive/` dir (no timestamp clutter). **Batch never clobbers** prior runs — preserves reproducibility + parametric sweeps. The `release/` contract decouples a messy run from the current-good artifact: the next tool reads from `release/`, not from a sibling's run dir.
+**run-id** = UTC `YYYYMMDD-HHMMSS[-N]`; the `latest` symlink in each tool dir points at the newest batch. **GUI/shell** sessions use a stable `interactive/` dir (no timestamp clutter). **Batch never clobbers** prior runs — preserves reproducibility + parametric sweeps. As of v0.4.2 this holds even when two launches share a wall-clock second: the run dir is minted with a plain `mkdir` (no `-p`), which fails atomically on an existing dir and therefore doubles as the collision lock — the second launch lands in `<run-id>-2` (suffixes `-2`..`-9`; pre-v0.4.2, `mkdir -p` silently "succeeded" into the existing dir and both runs interleaved). The `release/` contract decouples a messy run from the current-good artifact: the next tool reads from `release/`, not from a sibling's run dir.
 
 ### You operate from `~/work/lambda`
 
@@ -283,7 +284,7 @@ The flow:
 
 1. **Edit C++/SystemC source** in your editor. Files live under `src/blocks/<block>/{*.h,*.cpp,tb/*.cpp}`.
 2. **Author or update `stratus/project.tcl`** to list those source paths, name the top `define_hls_module`, pick a clock period, define one or more `define_hls_config <name>` entries.
-3. **`lambda-stratus <block> gui`** loads the module, checks X11, launches `stratus_ide -prj project.tcl` detached. The GUI opens with the source tree + your synthesis targets in a sidebar.
+3. **`lambda-stratus <block> gui`** loads the module, checks X11, launches `stratus_ide -project project.tcl` detached. The GUI opens with the source tree + your synthesis targets in a sidebar.
 4. **Run `cynth BASIC`** from the GUI menu (or from a Tcl console pane). Stratus reads the C++ source, applies HLS, emits Verilog RTL under the project's working dir.
 5. **For CI / overnight regression / scripted iteration:** `lambda-stratus <block> batch BASIC` does the same thing headlessly. Identical output. The GUI is for inspection, not source-of-truth.
 
@@ -354,13 +355,14 @@ sync-promote
 bash ~/architecture/tools/install.sh
 
 # 3. Verify — autofs-aware, node-class-aware probe.
-#    Run from a COMPUTE node (qsh -q normal.q -now n -V); the login node carries
-#    only Virtuoso + vManager and will FAIL most tool probes by design.
+#    Run from a COMPUTE node (qsh -q normal.q -now n -V). The login node CAN
+#    automount the digital tools too (Chamber execution model §2), but it is
+#    sized for interactive Virtuoso/vManager — probe and run on compute.
 chamber-diagnose
 lambda-diagnose
 ```
 
-If `chamber-diagnose` reports any `[FAIL]`, fix those before launching tools. The most common cause on a fresh setup is being on the login node — the probe will explicitly say so. The next most common is `$DISPLAY` unset (X11 forwarding broken) — fix at the SSH layer with `ssh -X` or `-Y`.
+If `chamber-diagnose` reports any `[FAIL]`, fix those before launching tools. The most common cause on a fresh setup is an autofs / heterogeneous-farm gap on the current node (the probe says so and points at a fresh compute shell — `qsh -q normal.q -now n -V` reshuffles you onto a node whose autofs map carries the tool). The next most common is `$DISPLAY` unset (X11 forwarding broken) — fix at the SSH layer with `ssh -X` or `-Y`.
 
 ### Daily flow — HLS one block
 
@@ -455,7 +457,7 @@ Trigger to split: **the second project lands.** At that point, factor `tools/bin
 | **v0.3** (2026-06-06) | `innovus-here` + `lambda-innovus` (Stylus Common UI: `gui`/`shell`/`batch`/`diagnose`/`clean`), root `Makefile` flow wrapper, stub `src/blocks/mate/innovus/setup.tcl`, initial module pins (`innovus/251`, `xcelium/2109`) | **CHAMBER-CONFIRMED LIVE 2026-06-06.** Innovus Stylus GUI launched on compute node `ip-10-2-6-68`, license `invs` checked out clean. Initial pins were wrong (login-node debug confused autofs with "not installed"; v0.4 corrects them). |
 | **v0.4** (2026-06-06) | `tools/lib/lambda-run.sh` (shared `lambda_require_tool`/`lambda_rundir`/`lambda_publish_release`), new launchers `genus-here`+`lambda-genus`, `xrun-here`+`lambda-xcelium`, `verisium-here`+`lambda-verisium`; Genus synth stub `src/blocks/mate/genus/synth.tcl`; CORRECTED module pins to confirmed-installed three-level matched family (`stratus/2201/22.01.009`, `genus/211/21.18.000`, `innovus/211/21.18.000`, `xcelium/2403/24.03.005`); **run-area relocation from `~/architecture/build/` → `~/work/lambda/`** (`$LAMBDA_WORK` home-backed; `LAMBDA_BUILD` aliased for back-compat; `src/blocks/mate/stratus/project.tcl` reads `$::env(LAMBDA_BUILD)` so Tcl follows bash); release/ handoff contract + MANIFEST; `chamber-diagnose` switched to autofs-aware load-then-test + node-type detection; README/handoff Calibre→Pegasus + PrimeTime→Tempus/SSV. | **PARTIALLY CHAMBER-CONFIRMED 2026-06-06.** Per `src/README.md` status checklist: `make diag` on `ip-10-2-6-68` resolves all 7 tools; Innovus + Genus GUIs launched cleanly. Batch paths + Verisium primary still rely on the named-fallback contract — first real RTL is the smoke test that closes that gate. |
 | **v0.4.1** (2026-06-06, late same day) | `tools/lib/lambda-run.sh` adds `lambda_finalize_rundir` (writes `<run-dir>/STATUS` as PASS\|FAIL + UTC + rc); `lambda-stratus batch` retiered to per-invocation `<run-id>/` dir + publishes `<b>.hls.v` to `release/` on rc=0 + finalizes STATUS; `lambda-genus`/`lambda-innovus` add finalize hook after publish; `lambda-xcelium sim`/`batch` drop `exec` to capture rc, then finalize (gui keeps `exec`); `src/blocks/mate/genus/synth.tcl` skeleton comment updated to read from `release/<b>.hls.v`; `docs/tools-overview.md` "Directory dependencies and log/run dataflow" section added. **Closes audit gaps:** #1 (Stratus race on shared `<CFG>/` dir), #2 (no STATUS marker for crash-vs-success), #4 (Stratus→Genus release contract). **Deferred (named):** #3 (RUNINFO sidecar — STATUS is enough for v0.4.2 cost-benefit), #5 (ShellCheck CI workflow). | **COMMITTED `77a7e42` ON BRANCH `v0.4.1-launcher-audit-fixes`, PR #3.** `bash -n` clean on all 5 modified shell scripts. Chamber smoke pending: 6-step test plan in the PR body (per-run-id isolation, STATUS pass/fail, concurrent shells, release publish + MANIFEST, cross-tool parity, diagnose regression). |
-| **v0.4.2** (next iteration) | Audit gap #5 (`.github/workflows/lint-tools.yml` running shellcheck + `bash -n` over `tools/bin/*` + `tools/lib/*`); optional audit gap #3 (`lambda_emit_runinfo` for host/user/argv/env/git-sha sidecar if STATUS proves insufficient in practice). | Not started. CI workflow is ~30 lines + zero runtime cost; pays off the next time anyone refactors a launcher. |
+| **v0.4.2** (2026-06-10) | Fix pass off the live-confirmed chamber bug: `latest`-symlink repoint corrected to single `ln -sfn` (old temp+`mv` dance left `latest` pinned to run 1 and dropped `.latest.<pid>` links — found live in `mate/xcelium/20260606-174533/`); run-id same-second collisions now take an atomic-`mkdir`-minted `-N` suffix; bash-4.2 `set -u` empty-`"$@"`/`$*` guards (`${1+"$@"}`) at every forwarding site; atomic release publish (same-dir tmp + rename); `lambda.env` sourced FIRST so derived vars follow overrides; `LAMBDA_ROOT` exported for flow Tcl; `innovus-here` log-tag branch fixed (was a v0.3 leftover) + all log-tag regexes accept the `-N` suffix; Genus/Innovus batch `-log` colocated into the run dir; `make clean` single summary confirm + non-tty guard; sync-chamber.sh hardening (no hard CHAMBER_PATH, real shallow check, EXIT-trap bundle cleanup); shellcheck + `bash -n` CI (`.github/workflows/lint.yml` — closes audit gap #5). Gap #3 (RUNINFO sidecar) deferred to v0.4.3. | **Authored off-chamber 2026-06-10; `bash -n` + shellcheck clean locally; mint/symlink/publish logic verified in a sandbox harness.** Chamber smoke = the v0.4.1 6-step plan PLUS: run two batch launches and confirm `latest` tracks the newest across both, and confirm zero `.latest.*` droppings anywhere under `$LAMBDA_WORK`. |
 | **v0.2** (when MatE HLS source lands) | license preflight wired into all launchers via a new `tools/lib/lambda-license.sh`, optional `--wait` queue-mode | Gated on MatE HLS C++ source committed. |
 | **v0.5** (when a real PDK is readable from ETX) | `lambda-pegasus` (DRC/LVS), `lambda-tempus` (STA via SSV), `lambda-quantus`, `lambda-voltus`, `lambda-virtuoso`; a real `init_design`→`route`→`signoff` flow replacing the `setup.tcl` + `synth.tcl` stubs | **Gated on PDK, not on tools.** The tools (`pegasus/232`, `ssv/251`, plus Genus/Innovus/Xcelium from v0.4) are present on compute nodes. What's missing is the PDK: `/process/hosted` has only `gpdk` + `skywater` — **no TSMC N16FFC**. `advgpdk` (the installed `cds_ff_mpt`) is the only FinFET-class vehicle and is usable for flow bring-up; the real-process flow waits on PDK delivery via `/process/hosted/xfer/incoming/` (admin-gated, TSMC University FinFET NDA). |
 
@@ -522,7 +524,7 @@ Every batch launcher emits **three classes of artifact**, in three locations:
 | **Flat-list log** (one line per launch, easy to tail) | `$LAMBDA_LOGS/<tool>.<block>.<mode>[.<cfg>].<UTC-ts>.log` | Until log rotation (v0.5.1) | `*-report` subcommand; cross-block grep |
 | **Release artifact + manifest** (cross-stage handoff) | `$LAMBDA_WORK/<block>/release/<artifact>` + `release/MANIFEST` | Overwritten on next successful publish; manifest is append-only | The *next* tool in the flow — never the producer |
 
-The duplication is intentional. Run-dir logs are colocated with the artifacts the tool emitted, so when you `cd` into `mate/innovus/20260606-100530/` you have everything. The flat-list logs are the cross-block tail target — `tail -f $LAMBDA_LOGS/*.log` shows every run from every tool. The release artifacts are the **only** files the next stage may read from.
+The duplication is intentional. Run-dir logs are colocated with the artifacts the tool emitted, so when you `cd` into `mate/innovus/20260606-100530/` you have everything. v0.4.2 makes that exact for Genus/Innovus batch: the Cadence-native `-log` now points INTO the run dir (`genus.<ts>.log`/`.cmd`, `innovus.<ts>.log`/`.cmd` next to `outputs/` and `STATUS`), while the wrapper's console transcript is still tee'd to the flat `$LAMBDA_LOGS` list. GUI/shell sessions keep `-log` in `$LAMBDA_LOGS` — their shared `interactive/` dir gains nothing from per-run colocation. The flat-list logs are the cross-block tail target — `tail -f $LAMBDA_LOGS/*.log` shows every run from every tool. The release artifacts are the **only** files the next stage may read from.
 
 ### Per-tool dependency map
 
@@ -543,8 +545,8 @@ The duplication is intentional. Run-dir logs are colocated with the artifacts th
 ┌─────────────────────────────────────────────┐   ┌─────────────────────────────────────────────────────┐
 │ lambda-genus <b> {gui|shell|batch <flow>}   │   │ run dir: WORK/<b>/genus/[<run-id>/|interactive/]    │
 │   PROJ/src/blocks/<b>/genus/<flow>.tcl      │ → │   outputs/<b>.mapped.v, reports/{timing,area,pwr}   │
-│   WORK/<b>/release/<b>.hls.v   (consumer)   │   │   genus.log, genus.cmd                              │
-│                                             │   │ log:     LOGS/genus.<b>.<mode>.<ts>.log             │
+│   WORK/<b>/release/<b>.hls.v   (consumer)   │   │   genus.<ts>.log/.cmd   (batch -log → run dir)     │
+│                                             │   │ log:     LOGS/genus.<b>.<mode>.<ts>.log (transcript)│
 │                                             │   │ release: WORK/<b>/release/<b>.mapped.v   (on rc=0)  │
 │                                             │   │ manifest: WORK/<b>/release/MANIFEST  (append)       │
 └─────────────────────────────────────────────┘   └─────────────────────────────────────────────────────┘
@@ -553,8 +555,8 @@ The duplication is intentional. Run-dir logs are colocated with the artifacts th
 ┌─────────────────────────────────────────────┐   ┌─────────────────────────────────────────────────────┐
 │ lambda-innovus <b> {gui|shell|batch <flow>} │   │ run dir: WORK/<b>/innovus/[<run-id>/|interactive/]  │
 │   PROJ/src/blocks/<b>/innovus/<flow>.tcl    │ → │   outputs/<b>.routed.{def,v,gds}                    │
-│   WORK/<b>/release/<b>.mapped.v             │   │   innovus.log, innovus.cmd, db/                     │
-│   (exported as $LAMBDA_NETLIST)             │   │ log:     LOGS/innovus.<b>.<mode>.<ts>.log           │
+│   WORK/<b>/release/<b>.mapped.v             │   │   innovus.<ts>.log/.cmd (batch -log → run dir), db/ │
+│   (exported as $LAMBDA_NETLIST)             │   │ log:     LOGS/innovus.<b>.<mode>.<ts>.log (transcr.)│
 │                                             │   │ release: WORK/<b>/release/<b>.routed.{def,v,gds}    │
 └─────────────────────────────────────────────┘   └─────────────────────────────────────────────────────┘
                                                          │
@@ -595,29 +597,33 @@ A launcher fails over through a defined ladder before giving up. Know the ladder
 
 Same shape in `lambda-stratus`, `lambda-genus`, `lambda-innovus`, `lambda-xcelium`.
 
-**Run-dir selection** (`lambda_rundir`, `lambda-run.sh:98-137`):
+**Run-dir selection** (`lambda_rundir`, `tools/lib/lambda-run.sh`):
 
 | Mode | Path | Re-use? | `latest` symlink updated? |
 |---|---|---|---|
 | `gui` | `$LAMBDA_WORK/<b>/<tool>/interactive/` | yes (stable dir) | no |
 | `shell` | `$LAMBDA_WORK/<b>/<tool>/interactive/` | yes | no |
-| `batch` | `$LAMBDA_WORK/<b>/<tool>/<UTC-runid>/` | never — new dir per invocation | yes (atomic-ish: `ln -sfn <id> .latest.$$; mv -f .latest.$$ latest`) |
+| `batch` | `$LAMBDA_WORK/<b>/<tool>/<UTC-runid>[-N]/` | never — plain `mkdir` (no `-p`) is the atomic mint/lock; same-second collisions take suffix `-2`..`-9` (v0.4.2) | yes — single relative `ln -sfn <id> latest` (v0.4.2) |
 
-**Storage fallback ladder** (`lambda-env.sh:141-153`, `lambda-detach.sh:54-61`, each launcher's log-dir guard):
+The old `latest` update (`ln -sfn <id> .latest.$$; mv -f .latest.$$ latest`) looked atomic but was WRONG: once `latest` exists as a symlink to a directory, `mv` resolves it and moves the temp link INTO the previous run dir, so `latest` stayed pinned to the first-ever run and `.latest.<pid>` droppings accumulated inside it. Live-confirmed on the chamber 2026-06-10 (stray `.latest.<pid>` links inside `mate/xcelium/20260606-174533/`). `ln -sfn` is unlink+create — a microscopic non-atomic window, but correct.
+
+**Storage fallback ladder** (`lambda-env.sh` work-area guard, `lambda-detach.sh` log-dir guard, each launcher's log-dir guard):
 
 1. Try `$LAMBDA_WORK` (= `~/work/lambda`, NFS home). If writable → use it.
 2. Fall back to `$LAMBDA_FAST` (= `/tmp/$USER-lambda`, node-local, wiped on reboot). Warn to stderr.
 3. For per-launch log files specifically: if `$LAMBDA_LOGS` not writable, fall back to `/tmp/<basename>`. Warn.
 4. There is no further fallback. If even `/tmp` is unwritable, the launcher fails with a clear error.
 
-**Module fallback ladder** (`lambda-env.sh:92-138`):
+**Module fallback ladder** (`lambda-env.sh` module bootstrap):
 
 1. If `LAMBDA_MODULE_INIT` is set in `~/.longhorn/lambda.env` → source it. (Per-user override; always wins.)
 2. Else if `$MODULESHOME/init/bash` exists (the standard Environment Modules layout) → source it. (Verified on `ae03ut01`.)
 3. Else iterate a static list of 16 known module-init paths covering Env Modules, Lmod, and chamber-specific install layouts. Use the first that exists.
 4. If none → `module` is undefined, every `lambda_require_tool` call fails with the canonical chamber-diagnose hint.
 
-**Verisium tool fallback** (`verisium-here:86-118` — only fallback for an *application* binary, not a path/dir):
+**Env-var precedence** (`lambda-env.sh`, reworked v0.4.2): `~/.longhorn/lambda.env` is sourced FIRST, then committed defaults fill whatever is still unset via `: "${VAR:=default}"`. Net order: plain `VAR=...` assignments in `lambda.env` win over values inherited from the environment, which win over the committed defaults (a `lambda.env` that wants the inherited environment to beat it can itself use `: "${VAR:=...}"`). The reason source-first matters: derived vars (`LAMBDA_LOGS`/`LAMBDA_BUILD`/`LAMBDA_SCRATCH`) are computed from `LAMBDA_WORK`, so an override of `LAMBDA_WORK` in `lambda.env` now propagates into all of them — pre-v0.4.2, the file was sourced last and the derived vars were already frozen to the default tree. `LAMBDA_BLOCKS` is a project invariant, assigned unconditionally — not overridable per-user. `LAMBDA_ROOT` is now exported (v0.4.2) so flow Tcl can read `$::env(LAMBDA_ROOT)`.
+
+**Verisium tool fallback** (`verisium-here` — only fallback for an *application* binary, not a path/dir):
 
 1. Try `$VERISIUM_MODULE` (`verisiumdebug/2403/24.03.001`) → load + `command -v verisium` → exec `verisium debug -input <waves>`.
 2. On any failure, fall through. Print the captured primary error. Try `$XCELIUM_MODULE` → load + `command -v simvision` → exec `simvision -waves <waves>`. (SimVision ships inside `XCELIUM2403`, decade-stable.)
@@ -680,11 +686,13 @@ A teammate dropping into someone else's `~/work/lambda/` can answer three differ
 
 | Question | Where to look | Updated by |
 |---|---|---|
-| "Which run was the most recent for this block × tool?" | `<block>/<tool>/latest` symlink | `lambda_rundir batch` at mint time |
+| "Which run was the most recent for this block × tool?" | `<block>/<tool>/latest` symlink | `lambda_rundir batch` at mint time (single `ln -sfn`, v0.4.2) |
 | "Did that specific run pass or fail?" | `<block>/<tool>/<run-id>/STATUS` file (`PASS \| FAIL` + UTC + rc) | `lambda_finalize_rundir` at exit |
 | "Which run produced the artifact the next stage is currently consuming?" | `<block>/release/MANIFEST` tail entry per artifact | `lambda_publish_release` on rc=0 |
 
 The three signals are independent on purpose. `latest` follows invocations, not success — so `lambda-verisium <block>` reaches a *crashed* run's `waves.shm/` for debug. `STATUS` answers pass/fail of that specific run without grepping the log. `MANIFEST` tracks the cross-stage handoff: which run-id stamped the artifact the consumer reads.
+
+**`latest` semantics caveat (fixed v0.4.2):** before v0.4.2 the repoint used a temp-symlink + `mv -f` dance that silently failed once `latest` pointed at a directory — `mv` resolved the symlink and moved the temp link *into* the old run dir, so `latest` stayed pinned to the first-ever run forever while every later mint dropped a `.latest.<pid>` link inside it. This was not theoretical: live-confirmed on the chamber 2026-06-10, with stray `.latest.<pid>` links found inside `mate/xcelium/20260606-174533/`. If you see `.latest.*` files in an old run dir, they are fossils of that bug — safe to delete. Post-v0.4.2, `latest` genuinely tracks the newest invocation via a single relative `ln -sfn`.
 
 ### Pitfall: what's *not* in this map yet
 
@@ -692,7 +700,15 @@ One edge still uses a placeholder, gated on tooling not yet present:
 
 - **Innovus → Pegasus** publishes `<b>.routed.{def,v,gds}` to `release/` as of v0.4 (`lambda-innovus batch` calls `lambda_publish_release`), but `lambda-pegasus` itself doesn't exist — it lands in v0.5 along with Tempus/Quantus/Voltus once a readable TSMC N16FFC PDK is delivered (see "Phasing" v0.5 row). The release-side of this edge is wired; the consumer-side is gated on PDK delivery, not on tool framework work.
 
-Gaps #1 (shared Stratus `<CFG>/` race), #2 (no STATUS marker), and #4 (Stratus → Genus broken release edge) from the v0.4 audit were closed in v0.4.1 — Stratus now mints per-invocation `<run-id>/` dirs, every batch launcher writes a STATUS marker via `lambda_finalize_rundir`, and `lambda-stratus batch` publishes `<b>.hls.v` to `release/` so the Genus stub reads from the contract path. See the dependency map above for the post-v0.4.1 state.
+Audit-gap scoreboard:
+
+- **Gaps #1, #2, #4** (shared Stratus `<CFG>/` race; no STATUS marker; Stratus → Genus broken release edge) — **CLOSED in v0.4.1**: per-invocation `<run-id>/` dirs, `lambda_finalize_rundir` STATUS markers, `<b>.hls.v` published to `release/`.
+- **Gap #5** (no lint CI over the launcher framework) — **CLOSED in v0.4.2**: `.github/workflows/lint.yml` runs shellcheck (severity=warning, SC1090/SC1091 excluded — chamber-only source paths) + `bash -n` over `tools/bin/*`, `tools/lib/*.sh`, `tools/install.sh`, and `.github/scripts/*.sh` on every push to main and every PR.
+- **Gap #3** (RUNINFO sidecar: host/user/argv/env/git-sha per run) — **still deferred, now to v0.4.3**. STATUS + MANIFEST have covered every postmortem so far; revisit if a debugging session actually wants the sidecar.
+- **Release publish is now atomic** (v0.4.2): `lambda_publish_release` stages to a same-directory `*.tmp.$$` then renames, so a consumer reading `release/` mid-publish sees old-complete or new-complete, never a truncated artifact. Same-dir rename is atomic including on NFS.
+- **Documented limitation — MANIFEST append is not atomic cross-node.** Two publishers on *different* NFS clients in the same instant could interleave or lose a MANIFEST line (`>>` append is only atomic per-client for small writes). Accepted: MANIFEST is an append-only audit trail, not control flow, and simultaneous cross-node publishes of the *same block's* release are outside the intended workflow.
+
+See the dependency map above for the post-v0.4.2 state.
 
 ---
 
@@ -701,16 +717,16 @@ Gaps #1 (shared Stratus `<CFG>/` race), #2 (no STATUS marker), and #4 (Stratus �
 | File | Type | Lines | Purpose |
 |---|---|---|---|
 | `tools/install.sh` | installer | ~120 | **v0.4 expanded.** Idempotent: symlinks `tools/bin/*` into `~/bin/` (picks up new launchers via glob); provisions `~/work/lambda/{logs,inputs}` (the home-backed run area); writes a 2-line stub `~/work/lambda/Makefile` (uses `?=` so user overrides win); runs `lambda-diagnose`. |
-| `tools/lib/lambda-env.sh` | sourced | ~60 | Default paths, tool module pins, Lambda block list, module init bootstrap. Sources `~/.longhorn/lambda.env` if present (per-user override). |
+| `tools/lib/lambda-env.sh` | sourced | ~165 | Default paths, tool module pins, Lambda block list, module init bootstrap. v0.4.2: sources `~/.longhorn/lambda.env` FIRST (overrides propagate into derived `LAMBDA_LOGS`/`BUILD`/`SCRATCH`); exports `LAMBDA_ROOT` for flow Tcl. See "Env-var precedence" under Resolution rules. |
 | `tools/lib/lambda-detach.sh` | sourced | ~55 | `gui_detach <tag> <tool> <args...>`: nohup + log + PID file. Encapsulates the csh-vs-bash GUI backgrounding pattern. |
-| `tools/bin/stratus-gui` | generic launcher | ~70 | Opens `stratus_ide -prj <file>` on a project.tcl in CWD or an explicit path. Module load + X11 check + detach. |
+| `tools/bin/stratus-gui` | generic launcher | ~70 | Opens `stratus_ide -project <file>` on a project.tcl in CWD or an explicit path. Module load + X11 check + detach. |
 | `tools/bin/stratus-batch` | generic launcher | ~70 | Runs `stratus -batch <project> -do "cynth <config>; exit"` headless. Logs to scratch. |
 | `tools/bin/chamber-diagnose` | generic probe | ~120 | Shell, X11, module system, tool availability, storage paths, license server, `~/bin/` PATH check. Read-only. |
 | `tools/bin/lambda-stratus` | project wrapper | ~225 | **v0.1, v0.4.1 retrofit.** Resolves `<block>` to its `stratus/project.tcl`; delegates to `stratus-gui` / `stratus-batch`. Adds `clean`, `report`, `diagnose` subcommands. v0.4.1: `batch` mints per-invocation `<run-id>/` via `lambda_rundir` (closes shared-CFG race), captures rc, publishes `<b>.hls.v` to `release/` via `lambda_publish_release` on rc=0, finalizes STATUS via `lambda_finalize_rundir`. `gui` unchanged (interactive/ dir, no STATUS — no defined exit-success semantics for GUI sessions). |
 | `tools/bin/lambda-diagnose` | project probe | ~70 | Runs `chamber-diagnose` then adds Lambda-specific checks: LAMBDA_ROOT, git HEAD, per-block project.tcl presence. |
 | `tools/bin/innovus-here` | generic launcher | ~150 | **v0.3, v0.4 retrofit.** Foreground Innovus (Stylus) launcher: `gui`/`shell`/`batch`. Verified-flags-only on interactive; `-files` for batch. v0.4 uses `lambda_require_tool` from `lambda-run.sh`. |
 | `tools/bin/lambda-innovus` | project wrapper | ~210 | **v0.3, v0.4 retrofit, v0.4.1 finalize.** Resolves `<block>` to `$LAMBDA_WORK/<block>/innovus/` run dir + `src/blocks/<block>/innovus/` flow dir; uses `lambda_rundir` for interactive vs `<run-id>`/batch; on batch publishes `<block>.routed.{def,v,gds}` to `release/` via `lambda_publish_release` and finalizes STATUS via `lambda_finalize_rundir` (v0.4.1). |
-| `Makefile` (repo root) | flow wrapper | ~190 | **v0.3, v0.4 expanded.** Ergonomic + dependency-DAG layer. v0.4 adds `genus`/`genus-shell`/`genus-batch`, `sim`/`sim-gui`/`sim-batch`, `waves`/`waves-diag`, plus updated help and `$LAMBDA_WORK`-rooted FLOW DAG. |
+| `Makefile` (repo root) | flow wrapper | ~220 | **v0.3, v0.4 expanded, v0.4.2 hardened.** Ergonomic + dependency-DAG layer. v0.4 adds `genus`/`genus-shell`/`genus-batch`, `sim`/`sim-gui`/`sim-batch`, `waves`/`waves-diag`, plus updated help and `$LAMBDA_WORK`-rooted FLOW DAG. v0.4.2: `export LAMBDA_WORK` so recipe children actually see the make-level value; `clean` is one summary y/N confirm across all four tool dirs and refuses without a tty. |
 | `src/blocks/mate/innovus/setup.tcl` | flow stub | ~70 | **v0.3.** Stub Stylus flow: documents the Foundation-flow skeleton; live body is pure-core Tcl. Exits in batch via `INNOVUS_BATCH`. |
 | `tools/lib/lambda-run.sh` | sourced | ~205 | **v0.4, v0.4.1 expanded.** Shared launcher helpers: `lambda_require_tool` (autofs/compute-node aware module-load + binary check, emits the LOGIN-vs-compute hint), `lambda_rundir` (interactive vs timestamped batch + `latest` symlink), `lambda_publish_release` (cross-stage handoff to `release/` + MANIFEST), `lambda_finalize_rundir` (v0.4.1: writes `<run-dir>/STATUS` as PASS\|FAIL + UTC + rc; best-effort, never fails the run). |
 | `tools/bin/genus-here` | generic launcher | ~125 | **v0.4.** Foreground Genus (Common UI is default; NO `-stylus`): `gui`/`shell`/`batch`. `batch` uses `-no_gui -files` + `GENUS_BATCH=1`. |

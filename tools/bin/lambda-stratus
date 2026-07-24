@@ -168,7 +168,10 @@ case "$subcmd" in
             exit 1
         fi
         # shellcheck disable=SC2012  # ls -t is intentional for newest-first
-        latest=$(ls -t "$LAMBDA_LOGS"/stratus."${block}".batch."${config}".*.log 2>/dev/null | head -1)
+        # `|| true` (v0.4.2, m1): with no logs, ls exits non-zero and pipefail
+        # made the whole command substitution fail under set -e — the script
+        # died silently instead of printing the friendly hint below.
+        latest=$(ls -t "$LAMBDA_LOGS"/stratus."${block}".batch."${config}".*.log 2>/dev/null | head -1 || true)
         if [[ -z "$latest" ]]; then
             echo "ERROR: no logs found matching stratus.${block}.batch.${config}.*.log" >&2
             echo "Hint:  ls $LAMBDA_LOGS/" >&2

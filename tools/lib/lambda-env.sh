@@ -8,9 +8,25 @@
 # Per-user / per-machine overrides go in ~/.longhorn/lambda.env (gitignored,
 # parallel to ~/.longhorn/chamber.env used by sync-chamber.sh).
 #
-# Variables defined here use the ${VAR:=default} form so anything already in
-# the environment wins. Sourcing this file is idempotent.
+# Precedence (v0.4.2, M3 fix): ~/.longhorn/lambda.env is sourced FIRST, then
+# committed defaults are applied with the ${VAR:=default} form. Net effect:
+#   1. plain `VAR=...` assignments in lambda.env  — user values win
+#   2. values already exported in the environment — win over the defaults
+#   3. committed defaults below                   — fill whatever is left
+# Sourcing lambda.env BEFORE the derivations matters: derived vars
+# (LAMBDA_LOGS/BUILD/SCRATCH) are computed from LAMBDA_WORK, so an override of
+# LAMBDA_WORK in lambda.env now propagates into them instead of leaving them
+# pointing at the stale default tree (the pre-v0.4.2 bug). A lambda.env that
+# wants the inherited environment to beat it can itself use `: "${VAR:=...}"`.
+# LAMBDA_BLOCKS is a project invariant and is assigned unconditionally below —
+# it cannot be overridden per-user. Sourcing this file is idempotent.
 # ============================================================================
+
+# ---- Per-user overrides (sourced FIRST — see precedence note above) --------
+if [[ -f "$HOME/.longhorn/lambda.env" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.longhorn/lambda.env"
+fi
 
 # ---- Project paths ---------------------------------------------------------
 # Three storage classes; see docs/tools-overview.md "Filesystem & run-area".
@@ -63,15 +79,10 @@
 # ---- Lambda block list (canonical) ----------------------------------------
 # Source of truth for which block names lambda-* launchers accept.
 # Order matches src/README.md HLS build order (long poles first).
+# Assigned unconditionally AFTER the lambda.env source: project invariant,
+# not overridable per-user.
+# shellcheck disable=SC2034  # consumed by the sourcing launchers
 LAMBDA_BLOCKS=(mate kce vecu tiu msc lsu hif)
-
-# ---- Per-user overrides ----------------------------------------------------
-# Loaded last so user values win for everything except LAMBDA_BLOCKS (which
-# is a project invariant and should not be overridden per-user).
-if [[ -f "$HOME/.longhorn/lambda.env" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/.longhorn/lambda.env"
-fi
 
 # ---- Bootstrap module() in non-interactive bash ----------------------------
 # Chamber compute nodes run csh interactively; the Modules system is set up
@@ -150,4 +161,6 @@ if [[ ! -w "$LAMBDA_WORK" ]] || [[ ! -d "$LAMBDA_WORK" ]]; then
     LAMBDA_SCRATCH="$LAMBDA_WORK"
     mkdir -p "$LAMBDA_WORK" "$LAMBDA_LOGS" 2>/dev/null
 fi
-export LAMBDA_WORK LAMBDA_BUILD LAMBDA_LOGS LAMBDA_SCRATCH LAMBDA_FAST
+# LAMBDA_ROOT exported too (v0.4.2, M7): flow Tcl reads it from the process
+# env — e.g. src/blocks/mate/genus/synth.tcl uses $::env(LAMBDA_ROOT).
+export LAMBDA_ROOT LAMBDA_WORK LAMBDA_BUILD LAMBDA_LOGS LAMBDA_SCRATCH LAMBDA_FAST

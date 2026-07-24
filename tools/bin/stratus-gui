@@ -14,7 +14,7 @@
 #   1. Sources lambda-env.sh to set log paths + module pin.
 #   2. Resolves project.tcl (explicit arg, or auto-detect in CWD).
 #   3. Loads the Stratus module.
-#   4. Detaches stratus_ide -prj <file> via gui_detach (logs to scratch).
+#   4. Detaches stratus_ide -project <file> via gui_detach (logs to scratch).
 # ============================================================================
 
 set -euo pipefail

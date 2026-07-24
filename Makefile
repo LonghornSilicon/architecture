@@ -36,6 +36,10 @@
 BLOCK ?= mate
 CFG   ?= BASIC
 LAMBDA_WORK ?= $(HOME)/work/lambda
+# v0.4.2 (M8): export so recipe children (the bash launchers) see the
+# make-level value; an unexported make var never reaches the recipe's
+# subprocess env, so launchers silently fell back to lambda-env.sh defaults.
+export LAMBDA_WORK
 
 # Launchers are on $PATH via tools/install.sh (~/bin symlinks). Fall back to the
 # in-repo path so `make` works even before install.sh has run.
@@ -152,7 +156,35 @@ innovus-diag:
 innovus-clean:
 	@$(LAMBDA_INNO) $(BLOCK) clean
 
-clean: hls-clean genus-clean sim-clean innovus-clean
+# v0.4.2 (m6): one summary confirmation instead of four sequential per-tool
+# prompts (the launchers' clean subcommands each ask their own y/N — fine
+# individually, tedious chained). Lists everything first, asks once, and
+# refuses outright when stdin is not a tty (CI / piped invocation) rather
+# than hanging on `read` or eating an EOF as "no".
+clean:
+	@if [ ! -t 0 ]; then \
+		echo "ERROR: 'make clean' is interactive (single y/N confirm); refusing without a tty." >&2; \
+		echo "Hint:  remove $(LAMBDA_WORK)/$(BLOCK)/{stratus,genus,xcelium,innovus} manually if scripting." >&2; \
+		exit 1; \
+	fi; \
+	echo "make clean will remove (BLOCK=$(BLOCK)):"; \
+	any=0; \
+	for d in stratus genus xcelium innovus; do \
+		t="$(LAMBDA_WORK)/$(BLOCK)/$$d"; \
+		if [ -d "$$t" ]; then du -sh "$$t" 2>/dev/null | sed 's/^/  /'; any=1; \
+		else echo "  (absent)  $$t"; fi; \
+	done; \
+	if [ "$$any" -eq 0 ]; then echo "Nothing to clean."; exit 0; fi; \
+	printf 'Confirm removal of ALL of the above? [y/N] '; \
+	read -r response; \
+	case "$$response" in \
+		y|Y|yes|YES) \
+			for d in stratus genus xcelium innovus; do \
+				rm -rf "$(LAMBDA_WORK)/$(BLOCK)/$$d"; \
+			done; \
+			echo "Removed.";; \
+		*) echo "Aborted."; exit 1;; \
+	esac
 
 # ============================================================================
 # FLOW DAG (intent; activate once real RTL + a readable PDK land)

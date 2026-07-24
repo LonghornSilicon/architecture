@@ -99,7 +99,8 @@ EOF
 #   block:  one of $LAMBDA_BLOCKS
 #   tool:   genus | innovus | xcelium | verisium | ...  (the run-dir bucket)
 #   mode:   gui | shell    -> $LAMBDA_WORK/<block>/<tool>/interactive
-#           batch          -> $LAMBDA_WORK/<block>/<tool>/<utc-runid>, latest -> here
+#           batch          -> $LAMBDA_WORK/<block>/<tool>/<utc-runid>[-N], latest -> here
+#                             (-N = 2..9 collision suffix when two launches share a second)
 # Prints the run-dir path on stdout; creates it; returns 1 on missing args.
 lambda_rundir() {
     local block="${1:?lambda_rundir: missing block}"
@@ -113,31 +114,54 @@ lambda_rundir() {
     case "$mode" in
         gui|shell)
             rundir="$tool_root/interactive"
+            if ! mkdir -p "$rundir" 2>/dev/null; then
+                echo "ERROR: cannot create run dir: $rundir" >&2
+                return 1
+            fi
             ;;
         batch)
-            local run_id
-            run_id="$(date -u +%Y%m%d-%H%M%S)"
+            # Parent must exist before the atomic per-run mkdir below.
+            if ! mkdir -p "$tool_root" 2>/dev/null; then
+                echo "ERROR: cannot create tool root: $tool_root" >&2
+                return 1
+            fi
+            # v0.4.2 (M1): two invocations sharing a wall-clock second used to
+            # collide silently (`mkdir -p` "succeeds" into the existing dir and
+            # both runs write into it). Plain `mkdir` (no -p) fails atomically
+            # on an existing dir, so it doubles as the collision lock: try
+            # <ts>, then <ts>-2 .. <ts>-9, give up after 9.
+            local ts run_id n
+            ts="$(date -u +%Y%m%d-%H%M%S)"
+            run_id="$ts"
+            n=1
+            until mkdir "$tool_root/$run_id" 2>/dev/null; do
+                n=$((n + 1))
+                if [[ "$n" -gt 9 ]]; then
+                    echo "ERROR: cannot mint unique run dir after 9 tries: $tool_root/${ts}[-N]" >&2
+                    echo "       (either 9+ concurrent launches this second, or $tool_root is unwritable)" >&2
+                    return 1
+                fi
+                run_id="$ts-$n"
+            done
             rundir="$tool_root/$run_id"
+            # v0.4.2 (C1): repoint `latest` with a single `ln -sfn`. The old
+            # "temp symlink + mv -f" dance was WRONG: when `latest` already
+            # exists as a symlink to a directory, GNU mv resolves it and moves
+            # the temp link INTO the previous run dir (mv's into-directory
+            # resolution), so `latest` stayed pinned to run 1 forever and
+            # `.latest.<pid>` droppings accumulated inside it. Empirically
+            # confirmed live on the chamber 2026-06-10 (stray `.latest.<pid>`
+            # links inside mate/xcelium/20260606-174533/). `ln -sfn` does
+            # unlink+symlink — a tiny non-atomic window, but correct, and
+            # infinitely better than a permanently stale pointer. Target stays
+            # RELATIVE (just the runid) so the tree survives a $LAMBDA_WORK move.
+            ln -sfn "$run_id" "$tool_root/latest" 2>/dev/null || true
             ;;
         *)
             echo "ERROR: lambda_rundir: unknown mode '$mode' (expected gui|shell|batch)" >&2
             return 1
             ;;
     esac
-
-    if ! mkdir -p "$rundir" 2>/dev/null; then
-        echo "ERROR: cannot create run dir: $rundir" >&2
-        return 1
-    fi
-
-    # Repoint `latest` for batch runs (atomic-ish via temp symlink + rename).
-    if [[ "$mode" == "batch" ]]; then
-        local latest_link="$tool_root/latest"
-        local tmp_link="$tool_root/.latest.$$"
-        ln -sfn "$(basename "$rundir")" "$tmp_link" 2>/dev/null && \
-            mv -f "$tmp_link" "$latest_link" 2>/dev/null || \
-            ln -sfn "$(basename "$rundir")" "$latest_link" 2>/dev/null
-    fi
 
     printf '%s\n' "$rundir"
 }
@@ -167,9 +191,20 @@ lambda_publish_release() {
     mkdir -p "$release_dir" 2>/dev/null || {
         echo "ERROR: cannot create release dir: $release_dir" >&2; return 1; }
 
-    # cp -L to dereference symlinks; -f to overwrite the prior release.
-    if ! cp -fL "$src" "$dst_path" 2>/dev/null; then
+    # cp -L to dereference symlinks; -f to overwrite a stale temp.
+    # v0.4.2 (M4): publish atomically — stage to a same-dir temp, then rename.
+    # A bare `cp -fL` onto the live release path truncates+rewrites in place,
+    # so a concurrent consumer (next stage reading release/) could see a
+    # half-written artifact. Same-directory rename is atomic, including on NFS.
+    local tmp_path="$dst_path.tmp.$$"
+    if ! cp -fL "$src" "$tmp_path" 2>/dev/null; then
+        echo "ERROR: failed to stage $src -> $tmp_path" >&2
+        rm -f "$tmp_path" 2>/dev/null
+        return 1
+    fi
+    if ! mv -f "$tmp_path" "$dst_path" 2>/dev/null; then
         echo "ERROR: failed to publish $src -> $dst_path" >&2
+        rm -f "$tmp_path" 2>/dev/null
         return 1
     fi
 

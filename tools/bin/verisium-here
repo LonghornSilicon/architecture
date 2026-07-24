@@ -93,6 +93,9 @@ echo ""
 echo "Attempting PRIMARY: Verisium Debug ($VERISIUM_MODULE)..."
 
 if lambda_require_tool "$VERISIUM_MODULE" verisium 2>/tmp/verisium-here.$$.err; then
+    # v0.4.2 (m8): remove the probe capture before exec — exec never returns,
+    # so the success path used to leak one /tmp/verisium-here.<pid>.err per run.
+    rm -f /tmp/verisium-here.$$.err
     echo "  -> opening: verisium debug -input $waves"
     exec verisium debug -input "$waves" -log "$log_file"
 fi

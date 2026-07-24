@@ -49,7 +49,7 @@ Lambda commits to a different quantization premise than your Precision Controlle
 
 - Each K/V vector is multiplied by a Walsh-Hadamard butterfly before compression. The butterfly *spreads* outlier coordinates roughly evenly across all dimensions — flattening the distribution toward Gaussian/Beta.
 - After the butterfly, every coordinate looks roughly uniform. A single 8-centroid Lloyd-Max codebook (3-bit indices) is then optimal across all coordinates without per-tile precision routing.
-- The result: compressed K and V have *no remaining outliers*. Attention scoring against them at INT8 (Q) × INT3 (compressed K) accumulated in INT24 is quality-neutral on LongBench, Needle-in-Haystack, and similar.
+- The result: compressed K and V have *no remaining outliers*. Attention scoring against them at INT8 (Q) × INT3 (compressed K) accumulated in INT24 is the design target; TurboQuant's published quality-neutral results are at full-head-dimension rotation / 3.5 bpe, and confirming the property at Lambda's 16-element block / 4.0 bpe variant is the pending pre-HLS golden-model eval.
 
 **These two architectures solve different problems.** Your Precision Controller solves "how do I route per-tile precision at run-time when outliers cause INT8 quality to degrade?" Lambda's approach solves "how do I eliminate the outliers entirely at write-time so INT8 always works?"
 
@@ -57,7 +57,7 @@ If TurboQuant works as advertised (and the published evidence — three independ
 
 **Specifically for Lambda's MatE:** there is no FP16 multiplier. The systolic array is INT8 × INT4 (for weight matmuls) and INT8 × INT3 (for attention scoring against compressed K). All FP16 work is in VecU (online softmax, RMSNorm, RoPE, SiLU) — the programmable SIMD where FP16 is unavoidable for transcendentals. The MatE fabric never sees an FP16 operand.
 
-**On the accumulator** (a separate but related fix): your spec uses INT16 accumulators in the MAC Array. Lambda's earlier draft did too — and we caught it as a bug on 2026-05-14. INT8 × INT4 produces an 11-bit signed product; reducing K=128 (head_dim) sums needs 18 bits signed, which overflows INT16 (max ±32767) after ~64 accumulations in the worst case. Lambda's MatE now uses an INT16 partial-product register inside each PE plus an **INT24 K-axis accumulator** at the column output. For your MAC Array, the same fix would apply.
+**On the accumulator** (a separate but related fix): your spec uses INT16 accumulators in the MAC Array. Lambda's earlier draft did too — and we caught it as a bug on 2026-05-14. INT8 × INT4 produces a product needing 12 signed bits in the (−128)×(−8) corner; reducing K=128 (head_dim) sums needs 18 bits signed, which overflows INT16 (max ±32767) after as few as ~32 worst-case accumulations. Lambda's MatE now uses an INT16 partial-product register inside each PE plus an **INT24 K-axis accumulator** at the column output. For your MAC Array, the same fix would apply.
 
 ---
 
@@ -80,7 +80,7 @@ If TurboQuant works as advertised (and the published evidence — three independ
 - Runtime precision controller as an architectural primitive (TurboQuant subsumes the problem).
 - FP16 MAC path in MatE (area we don't have at 4 mm²; not needed under TurboQuant).
 - Four-block decomposition (ACU/KVCE/TIU/MHC) as a substitute for Lambda's seven-block structure (MatE/VecU/KCE-mini/MSC/LSU/HIF/TIU). Lambda absorbs the *naming convention*, keeps its own block split for HLS reasons.
-- Compression-algorithm uncertainty (your KVCE doc lists GEAR/RotateKV/Lexico as candidates). Lambda has decided: TurboQuant. ICLR'26, three OSS implementations, quality-neutral at 3.5 bpe (32-pt) / 4.0 bpe (Lambda's 16-pt). KCE-mini block is locked.
+- Compression-algorithm uncertainty (your KVCE doc lists GEAR/RotateKV/Lexico as candidates). Lambda has decided: TurboQuant. ICLR'26, three OSS implementations, published quality-neutral at 3.5 bpe (full-head-dim rotation); Lambda's 16-element block variant at 4.0 bpe is a design target pending the pre-HLS golden-model eval. KCE-mini block is locked.
 
 ---
 
@@ -110,10 +110,10 @@ We'd love to talk through it. Faculty advisor will schedule a 30-min conversatio
 - LSU 32-instruction in-order RISC
 - HIF PCIe Gen3 x1 on M.2 form factor (revised 2026-05-14 from USB-C 2.0)
 - TIU per Phase 0.3 (entropy-driven adaptive precision)
-- Demo target: 3-5B-class transformer decode at 6-8 tok/s
+- Demo target: 3-5B-class transformer decode at 6.3–7.7 tok/s
 
 **Open:**
-- Demo model choice: Llama-3.2-3B vs Mistral-NeMo-3B vs Qwen2.5-3B (gated on ML eval Q3 2026)
+- Demo model choice: Llama-3.2-3B vs Qwen2.5-3B vs Ministral-3-3B-2512 (config unverified; gated on ML eval Q3 2026)
 - LPDDR PHY vendor (Synopsys vs Cadence vs fallback to LPDDR4X) — gated on Q2 2026 quote
 - Whether to add sparse-blocked attention as a second add-on (per literature audit, leaning yes)
 - Specific microcode encoding for VecU + LSU ISA — drafted in `src/isa/` during Phase E

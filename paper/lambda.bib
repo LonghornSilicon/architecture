@@ -2,11 +2,11 @@
 % Real citations only; arXiv IDs link to primary sources.
 
 @article{turboquant,
-  title   = {{TurboQuant}: Optimal Scalar Codebook {KV} Compression},
-  author  = {Ashkboos, Saleh and others},
+  title   = {{TurboQuant}: Online Vector Quantization with Near-optimal Distortion Rate},
+  author  = {Zandieh, Amir and Daliri, Majid and Hadian, Majid and Mirrokni, Vahab},
   journal = {arXiv preprint arXiv:2504.19874},
   year    = {2025},
-  note    = {Accepted to ICLR 2026}
+  note    = {Google. Accepted to ICLR 2026}
 }
 
 @inproceedings{flashattention,
@@ -62,22 +62,24 @@
 
 @article{kvquant,
   title   = {{KVQuant}: Towards 10 Million Context Length {LLM} Inference with {KV} Cache Quantization},
-  author  = {Hooper, Coleman and Kim, Sehoon and Mohammadi, Hiva and Mahoney, Michael W. and Shao, Yakun Sophia and Keutzer, Kurt and Gholami, Amir},
+  author  = {Hooper, Coleman and Kim, Sehoon and Mohammadzadeh, Hiva and Mahoney, Michael W. and Shao, Yakun Sophia and Keutzer, Kurt and Gholami, Amir},
   journal = {arXiv preprint arXiv:2401.18079},
   year    = {2024}
 }
 
 @article{kv_survey,
-  title   = {A Survey on {KV}-Cache Acceleration for Large Language Model Inference},
-  author  = {{Survey Authors}},
-  journal = {arXiv preprint arXiv:2506.13131},
-  year    = {2025}
+  title   = {A Survey on Large Language Model Acceleration based on {KV} Cache Management},
+  author  = {Li, Haoyang and Li, Yiming and Tian, Anxin and Tang, Tianhao and Xu, Zhanchao and Chen, Xuejia and Hu, Nicole and Dong, Wei and Li, Qing and Chen, Lei},
+  journal = {arXiv preprint arXiv:2412.19442},
+  year    = {2024}
 }
 
 @article{adaptive_kv,
-  title   = {Adaptive {KV}-Cache Quantization for Lightweight On-Device {LLM}s},
+  title   = {Don't Waste Bits! Adaptive {KV}-Cache Quantization for Lightweight On-Device {LLM}s},
+  author  = {Haeri Boroujeni, Sayed Pedram and Mehrabi, Niloufar and Woods, Patrick and Hillesheim, Gabriel and Razi, Abolfazl},
   journal = {arXiv preprint arXiv:2604.04722},
-  year    = {2026}
+  year    = {2026},
+  note    = {Clemson University}
 }
 
 @inproceedings{h2o,
@@ -97,10 +99,11 @@
 }
 
 @article{tova,
-  title   = {{TOVA}: Transformers are Multi-State {RNN}s with Token Omission via Attention},
-  author  = {Oren, Matanel and others},
+  title   = {Transformers are Multi-State {RNN}s},
+  author  = {Oren, Matanel and Hassid, Michael and Yarden, Nir and Adi, Yossi and Schwartz, Roy},
   journal = {arXiv preprint arXiv:2401.06104},
-  year    = {2024}
+  year    = {2024},
+  note    = {Introduces the TOVA (Token Omission Via Attention) eviction policy}
 }
 
 @inproceedings{jouppi_tpu,
@@ -274,7 +277,7 @@
   author  = {{Meta AI}},
   journal = {arXiv preprint arXiv:2407.21783},
   year    = {2024},
-  note    = {Llama-3.2-3B / -1B technical report; primary demo target family}
+  note    = {Covers Llama 3.1; Llama 3.2 (the 3B/1B demo targets) shipped with model cards only, no separate technical report. Primary demo target family}
 }
 
 @article{qwen25,
@@ -293,12 +296,12 @@
   note    = {Phi-3.5-mini; 32 KV-head layout is the KV-heavy outlier in Lambda's target set}
 }
 
-@misc{mistral_nemo,
-  title   = {Mistral-{NeMo}: A Multilingual Open-Weight Model},
-  author  = {{Mistral AI and NVIDIA}},
-  year    = {2024},
-  howpublished = {Mistral AI / NVIDIA joint release},
-  note    = {Mistral-NeMo-3B is one of Lambda's primary demo targets}
+@misc{ministral3,
+  title        = {{Ministral-3-3B-Instruct-2512} Model Card},
+  author       = {{Mistral AI}},
+  year         = {2025},
+  howpublished = {\url{https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512}},
+  note         = {Apache-2.0, December 2025; 3.4B-parameter language model plus 0.4B vision encoder. Candidate Lambda demo target; architecture config not yet verified against Lambda's memory budget, so no performance numbers are attached to it}
 }
 
 % ---- On-device deployment context ----
@@ -379,11 +382,11 @@
 % ---- Recent KV-cache compression survey (deep-read source) ----
 
 @article{rotatekv,
-  title   = {{RotateKV}: Accurate and Robust 2-Bit {KV} Cache Quantization via Outlier-Aware Adaptive Rotations},
-  author  = {{Various Authors}},
-  journal = {arXiv preprint arXiv:2401.18079},
-  year    = {2024},
-  note    = {Cited alongside QuaRot/TurboQuant in the rotation-based quant family}
+  title   = {{RotateKV}: Accurate and Robust 2-Bit {KV} Cache Quantization for {LLM}s via Outlier-Aware Adaptive Rotations},
+  author  = {Su, Zunhai and Chen, Zhe and Shen, Wang and Wei, Hanyu and Li, Linge and Yu, Huangqi and Yuan, Kehong},
+  journal = {arXiv preprint arXiv:2501.16383},
+  year    = {2025},
+  note    = {IJCAI 2025. Cited alongside QuaRot/TurboQuant in the rotation-based quant family}
 }
 
 % ---- Sohu / Etched comparison reference ----

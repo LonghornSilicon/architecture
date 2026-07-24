@@ -129,10 +129,15 @@ mkdir -p "$rundir" 2>/dev/null || {
     echo "ERROR: cannot create run dir: $rundir" >&2; exit 1; }
 cd "$rundir"
 
-# Tag for the log file: build/<block>/innovus -> "innovus.<block>.<mode>".
+# Tag for the log file: <block>/innovus/{interactive,<run-id>} -> "innovus.<block>.<mode>".
+# v0.4.2 (M5): the old branch still tested `rd_base == "innovus"` — a v0.3
+# leftover from the pre-rundir layout, never true for v0.4 rundirs
+# (interactive/ or <run-id>/), so logs were tagged with the run-id instead of
+# the block. Ported the corrected branch from genus-here; the run-id regex
+# allows the -N collision suffix minted by lambda_rundir.
 rd_base="$(basename "$rundir")"
-if [[ "$rd_base" == "innovus" ]]; then
-    tag_name="$(basename "$(dirname "$rundir")")"
+if [[ "$rd_base" == "interactive" || "$rd_base" =~ ^[0-9]{8}-[0-9]{6}(-[0-9]+)?$ ]]; then
+    tag_name="$(basename "$(dirname "$(dirname "$rundir")")")"   # <block>
 else
     tag_name="$rd_base"
 fi
@@ -147,6 +152,7 @@ echo "  mode:    $mode"
 echo "  run dir: $rundir"
 [[ -n "$flow" ]] && echo "  flow:    $flow"
 echo "  log:     $log_file"
+[[ "$mode" == "batch" ]] && echo "  tool log: $rundir/innovus.${timestamp}.log (+ .cmd)"
 echo ""
 
 # ---- Launch (foreground; inherits the terminal) ----------------------------
@@ -166,6 +172,11 @@ case "$mode" in
         # (`info exists ::env(INNOVUS_BATCH)`) without relying on a Cadence
         # command name — see src/blocks/<block>/innovus/setup.tcl.
         export INNOVUS_BATCH=1
-        exec innovus -stylus -no_gui -files "$flow" -log "$log_file"
+        # v0.4.2 (M6): batch points the Cadence-native -log INTO the run dir
+        # (innovus.<ts>.log/.cmd colocated with outputs/), while the console
+        # transcript is still tee'd to the flat $LAMBDA_LOGS list. GUI/shell
+        # keep -log in $LAMBDA_LOGS. Process substitution (not `| tee`) so
+        # exec really replaces the shell — same rationale as xrun-here.
+        exec innovus -stylus -no_gui -files "$flow" -log "$rundir/innovus.${timestamp}" > >(tee "$log_file") 2>&1
         ;;
 esac

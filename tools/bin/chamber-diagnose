@@ -56,8 +56,11 @@ section() { echo ""; echo "${BOLD}=== $1 ===${RESET}"; }
 # ---- 1. Shell + user -------------------------------------------------------
 section "Shell + user"
 host="$(hostname 2>/dev/null || echo unknown)"
+# v0.4.2 (m4): login-node wording aligned with the v0.4.1 ground truth —
+# login CAN autofs-mount the digital tools too; it's a scheduling/sizing
+# policy, not file availability. See docs/tools-overview.md §2.
 case "$host" in
-    ae[0-9]*ut[0-9]*) node_class="LOGIN node (Virtuoso + vManager only)" ;;
+    ae[0-9]*ut[0-9]*) node_class="LOGIN node (interactive Virtuoso/vManager; digital tools may mount, but run them on compute via qsh)" ;;
     ip-*)             node_class="compute node (digital + sim tools mount on demand)" ;;
     *)                node_class="unknown node class" ;;
 esac

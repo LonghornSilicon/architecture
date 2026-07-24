@@ -1,0 +1,29 @@
+# v0.4.2 — closes audit gap #5: shell lint over the launcher framework.
+# shellcheck (severity=warning) + bash -n over every shipped script.
+# SC1090/SC1091 excluded: lambda-env.sh / launchers source files whose paths
+# are only resolvable on the chamber (~/.longhorn/lambda.env, module inits).
+name: lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell-lint:
+    runs-on: ubuntu-latest
+    env:
+      SHELLCHECK_OPTS: --severity=warning --format=gcc --exclude=SC1090,SC1091
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: shellcheck
+        run: shellcheck tools/bin/* tools/lib/*.sh tools/install.sh .github/scripts/*.sh
+
+      - name: bash -n (syntax)
+        run: |
+          rc=0
+          for f in tools/bin/* tools/lib/*.sh tools/install.sh .github/scripts/*.sh; do
+            bash -n "$f" || rc=1
+          done
+          exit "$rc"

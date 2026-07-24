@@ -47,7 +47,10 @@ set +a
 : "${CHAMBER_HOST:?CHAMBER_HOST not set in $CONFIG}"
 : "${CHAMBER_PORT:?CHAMBER_PORT not set in $CONFIG}"
 : "${CHAMBER_USER:?CHAMBER_USER not set in $CONFIG}"
-: "${CHAMBER_PATH:?CHAMBER_PATH not set in $CONFIG}"
+# CHAMBER_PATH was required by the V1 file-mirror sync and is unused by the
+# V2 bundle flow (everything lands in CHAMBER_INBOX). Read optionally for
+# back-compat with older chamber.env files — do NOT hard-require it (v0.4.2, m3).
+CHAMBER_PATH="${CHAMBER_PATH:-}"
 
 # Default inbox path if not overridden in chamber.env
 CHAMBER_INBOX="${CHAMBER_INBOX:-/home/${CHAMBER_USER}/inbox/}"
@@ -88,9 +91,13 @@ if ! git rev-parse --verify main >/dev/null 2>&1; then
   echo "::error::no 'main' branch in $SOURCE_DIR. Bundle requires main."
   exit 1
 fi
-if [[ "$(git rev-list --count --all)" -eq 1 ]] && [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-  echo "::warning::Shallow checkout detected in CI. Bundle will have only one commit."
-  echo "::warning::Set 'fetch-depth: 0' on actions/checkout step."
+# v0.4.2 (m3): the old heuristic (`rev-list --count --all == 1`) only caught
+# depth-1 clones and only warned. Ask git directly and FAIL — a shallow bundle
+# breaks the chamber-side `git fetch` against existing history.
+if [[ "$(git rev-parse --is-shallow-repository 2>/dev/null)" == "true" ]]; then
+  echo "::error::Shallow checkout detected. A bundle from a shallow clone is incomplete."
+  echo "::error::Set 'fetch-depth: 0' on the actions/checkout step (or 'git fetch --unshallow' locally)."
+  exit 1
 fi
 
 # Build a unique bundle name: timestamp ensures uniqueness, SHA identifies content.
@@ -105,6 +112,11 @@ BUNDLE_NAME="architecture-${TIMESTAMP}-${SHA_SHORT}.bundle"
 BUNDLE_LOCAL="${TMPDIR:-/tmp}/${BUNDLE_NAME}"
 BUNDLE_REMOTE="${CHAMBER_INBOX%/}/${BUNDLE_NAME}"
 
+# v0.4.2 (m3): clean the local bundle on ANY exit (success, verify failure,
+# lftp error, signal) — previously the rm lines were skipped on early exits,
+# leaking bundles into $TMPDIR.
+trap 'rm -f "$BUNDLE_LOCAL"' EXIT
+
 # Always bundle main + HEAD. Including HEAD makes `git clone <bundle>` work
 # without manual ref-setting (bundle with main only fails with "remote HEAD
 # refers to nonexistent ref"). Chamber-side git fetch deduplicates objects,
@@ -114,9 +126,9 @@ echo "Bundling main (HEAD=$(git rev-parse --short=7 main))..."
 git bundle create "$BUNDLE_LOCAL" main HEAD
 
 # Sanity: lint the bundle so we don't ship a corrupt one.
+# (Cleanup handled by the EXIT trap above.)
 if ! git bundle verify "$BUNDLE_LOCAL" >/dev/null 2>&1; then
   echo "::error::Bundle verification failed: $BUNDLE_LOCAL"
-  rm -f "$BUNDLE_LOCAL"
   exit 1
 fi
 
@@ -133,8 +145,7 @@ put "$BUNDLE_LOCAL" -o "${BUNDLE_REMOTE}"
 bye
 EOF
 
-# Local cleanup
-rm -f "$BUNDLE_LOCAL"
+# Local cleanup happens via the EXIT trap.
 
 echo ""
 echo "Uploaded: ${BUNDLE_REMOTE}"

@@ -8,9 +8,12 @@
 
 - **Per-block attention-entropy accumulator.** 16-bit importance register per 16-token block; 128 blocks tracked (matches MSC block table); 256 B total SRAM.
 - **Updated by VecU during softmax.** Each attention pass: VecU broadcasts cumulative softmax weight per block to TIU; TIU accumulator adds.
-- **Consumed by two downstream paths:**
-  - MSC eviction policy: when scratchpad fills, evict block with lowest cumulative importance (H2O-style heavy-hitter retention)
-  - KVE per-block precision: high-importance blocks stay at the higher ChannelQuant tier (CQ-4+ or CQ-8); low-importance blocks demote to CQ-4 at the cost of quality
+- **Consumed downstream — evict-or-keep only.** MSC eviction policy: when the cache
+  fills, evict the lowest-cumulative-importance token (H2O-style heavy-hitter retention).
+  ~~KVE per-block precision demote (CQ-8 → CQ-4)~~ **retired under CQ-3-rot** (2026-07-20):
+  the WHT-rotated flat 3-bit value tier leaves no per-token value bit-width to select, so
+  the TIU keeps only its evict-or-keep lever (applies to K and V alike). See the block
+  repo's `docs/tier_handshake.md` (retirement note) and `STATUS.md` change log.
 - 0.03 mm²; 0.01 W; ~15 verification tests.
 
 ## Four CSR-selectable modes
@@ -20,7 +23,13 @@
 | `tiu_off` | No importance tracking. MSC eviction = pure FIFO. KVE = uniform ChannelQuant tier. |
 | `tiu_h2o` | Heavy-hitter retention. MSC evicts lowest-importance block. KVE stays at a uniform ChannelQuant tier. |
 | `tiu_streaming_llm` | Recent + sink tokens retained. MSC eviction = LRU except for first-N "attention sinks." |
-| `tiu_adaptive_precision` | Full adaptive. MSC eviction = importance-driven AND KVE per-block precision = importance-driven. |
+| `tiu_adaptive_precision` | Importance-driven MSC eviction. *(The KVE per-block precision half is retired under CQ-3-rot — values are a flat 3 bits; nothing to select. The mode now reduces to importance-driven eviction; see the demote note above.)* |
+
+> **Hub restatement — reconcile against the block repo.** This file is the architecture
+> hub's summary of `LonghornSilicon/token-importance-unit`, which is the source of truth
+> (ISA: `docs/isa/token_importance_unit_isa.md`; reference model: `sw/reference_model/`).
+> The block's *evict-or-keep + host-driven LOAD/EVICT* control model supersedes the older
+> "per-16-token-block precision" framing above.
 
 ## Why this block earns its 0.03 mm²
 
